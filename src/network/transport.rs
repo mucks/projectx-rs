@@ -20,10 +20,11 @@ pub struct Rpc {
 
 #[async_trait]
 pub trait Transport: TransportClone + Send + Sync + Debug {
-    async fn consume(&self) -> Channel<Rpc>;
-    async fn connect(&self, tr: Box<dyn Transport>) -> Result<()>;
+    fn consume(&self) -> Channel<Rpc>;
+    async fn recv(&self) -> Option<Rpc>;
+    async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()>;
     async fn send_message(&self, to: NetAddr, payload: Vec<u8>) -> Result<()>;
-    async fn addr(&self) -> NetAddr;
+    fn addr(&self) -> NetAddr;
 }
 
 pub trait TransportClone {

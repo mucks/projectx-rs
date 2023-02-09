@@ -12,8 +12,8 @@ mod network;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let tr_local = Box::new(network::LocalTransport::new("LOCAL".into()));
-    let tr_remote = Box::new(network::LocalTransport::new("REMOTE".into()));
+    let mut tr_local = Box::new(network::LocalTransport::new("LOCAL".into()));
+    let mut tr_remote = Box::new(network::LocalTransport::new("REMOTE".into()));
 
     tr_local.connect(tr_remote.clone()).await?;
     tr_remote.connect(tr_local.clone()).await?;
@@ -23,9 +23,8 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::task::spawn(async move {
         loop {
-            println!("Sending message from LOCAL to REMOTE");
             tr_remote_clone
-                .send_message("LOCAL".into(), b"Hello World".to_vec())
+                .send_message(tr_local_clone.addr(), b"Hello World".to_vec())
                 .await
                 .unwrap();
 

@@ -5,39 +5,29 @@ It is a simple in-memory transport that does not actually send messages over the
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Mutex, RwLock,
+};
 
 use super::{
-    server::Channel,
+    server::{new_channel, Channel},
     transport::{NetAddr, Rpc, Transport},
 };
 
 #[derive(Debug, Clone)]
 pub struct LocalTransport {
-    data: Arc<RwLock<LocalTransportData>>,
-}
-
-impl LocalTransport {
-    pub fn new(addr: NetAddr) -> Self {
-        Self {
-            data: Arc::new(RwLock::new(LocalTransportData::new(addr))),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LocalTransportData {
     addr: NetAddr,
     consume_channel: Channel<Rpc>,
     peers: HashMap<NetAddr, Box<dyn Transport>>,
 }
 
-impl LocalTransportData {
-    fn new(addr: NetAddr) -> Self {
+impl LocalTransport {
+    pub fn new(addr: NetAddr) -> Self {
         Self {
             addr,
-            consume_channel: Arc::new(Mutex::new(mpsc::channel(1024))),
+            consume_channel: new_channel(1024),
             peers: HashMap::new(),
         }
     }
@@ -45,30 +35,29 @@ impl LocalTransportData {
 
 #[async_trait]
 impl Transport for LocalTransport {
-    async fn consume(&self) -> Channel<Rpc> {
-        self.data.read().await.consume_channel.clone()
+    fn consume(&self) -> Channel<Rpc> {
+        self.consume_channel.clone()
     }
 
-    async fn connect(&self, tr: Box<dyn Transport>) -> Result<()> {
-        let t = &mut self.data.write().await;
-        t.peers.insert(tr.addr().await, tr);
+    async fn recv(&self) -> Option<Rpc> {
+        self.consume_channel.1.lock().await.recv().await
+    }
+
+    async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()> {
+        self.peers.insert(tr.addr(), tr);
         Ok(())
     }
 
     async fn send_message(&self, to: NetAddr, payload: Vec<u8>) -> Result<()> {
-        let t = &mut self.data.write().await;
         let peer =
-            t.peers
+            self.peers
                 .get(&to)
-                .ok_or(anyhow!("{} could not send message to {}", t.addr, to))?;
+                .ok_or(anyhow!("{} could not send message to {}", self.addr, to))?;
 
         peer.consume()
-            .await
-            .lock()
-            .await
             .0
             .send(Rpc {
-                from: t.addr.clone(),
+                from: self.addr.clone(),
                 payload,
             })
             .await?;
@@ -76,8 +65,8 @@ impl Transport for LocalTransport {
         Ok(())
     }
 
-    async fn addr(&self) -> NetAddr {
-        self.data.read().await.addr.clone()
+    fn addr(&self) -> NetAddr {
+        self.addr.clone()
     }
 }
 
@@ -87,41 +76,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect() -> Result<()> {
-        let tr_a = LocalTransport::new("A".into());
-        let tr_b = LocalTransport::new("B".into());
+        let mut tr_a = LocalTransport::new("A".into());
+        let mut tr_b = LocalTransport::new("B".into());
 
         tr_a.connect(Box::new(tr_b.clone())).await?;
         tr_b.connect(Box::new(tr_a.clone())).await?;
 
-        assert_eq!(
-            tr_a.data.read().await.peers[&tr_b.addr().await]
-                .addr()
-                .await,
-            tr_b.addr().await
-        );
-        assert_eq!(
-            tr_b.data.read().await.peers[&tr_a.addr().await]
-                .addr()
-                .await,
-            tr_a.addr().await
-        );
+        assert_eq!(tr_a.peers[&tr_b.addr()].addr(), tr_b.addr());
+        assert_eq!(tr_b.peers[&tr_a.addr()].addr(), tr_a.addr());
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_send_message() -> Result<()> {
-        let tr_a = LocalTransport::new("A".into());
-        let tr_b = LocalTransport::new("B".into());
+        let mut tr_a = LocalTransport::new("A".into());
+        let mut tr_b = LocalTransport::new("B".into());
 
         tr_a.connect(Box::new(tr_b.clone())).await?;
         tr_b.connect(Box::new(tr_a.clone())).await?;
 
         let msg = b"hello world!".to_vec();
-        tr_a.send_message(tr_b.addr().await, msg.clone()).await?;
+        tr_a.send_message(tr_b.addr(), msg.clone()).await?;
 
-        let rpc = tr_b.consume().await.lock().await.1.recv().await.unwrap();
-        assert_eq!(rpc.from, tr_a.addr().await);
+        let rpc = tr_b.recv().await.unwrap();
+        assert_eq!(rpc.from, tr_a.addr());
         assert_eq!(rpc.payload, msg.to_vec());
 
         Ok(())
