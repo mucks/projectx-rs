@@ -4,11 +4,11 @@
 // Tx
 // Keypair
 
-mod error;
-pub use error::{Error, Result};
 use network::{Server, Transport};
 
+mod core;
 mod network;
+mod types;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
