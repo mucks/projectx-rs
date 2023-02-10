@@ -1,3 +1,4 @@
+use super::common::from_bytes;
 use std::fmt::Display;
 
 use rand::RngCore;
@@ -20,14 +21,7 @@ impl Hash {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        if bytes.len() != 32 {
-            panic!(
-                "given bytes with length {} is not a valid hash, it must be 32 bytes long",
-                bytes.len()
-            );
-        }
-        let mut hash = [0; 32];
-        hash.copy_from_slice(bytes);
+        let hash = from_bytes::<32>(bytes);
         Self(hash)
     }
 

@@ -7,6 +7,7 @@
 use network::{Server, Transport};
 
 mod core;
+mod crypto;
 mod network;
 mod types;
 
