@@ -4,6 +4,7 @@ use p256::ecdsa::{
     signature::{Signer, Verifier},
     SigningKey, VerifyingKey,
 };
+use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::types::Address;
@@ -27,10 +28,11 @@ impl PrivateKey {
     pub fn sign(&self, data: &[u8]) -> Signature {
         let signing_key = SigningKey::from(&self.key);
         let signature: p256::ecdsa::Signature = signing_key.sign(data);
-        Signature { sig: signature }
+        Signature(signature)
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PublicKey {
     key: p256::PublicKey,
 }
@@ -49,19 +51,19 @@ impl PublicKey {
 
 impl Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in &self.sig.to_bytes() {
+        for byte in &self.0.to_bytes() {
             write!(f, "{byte:02x}")?;
         }
         Ok(())
     }
 }
-pub struct Signature {
-    sig: p256::ecdsa::Signature,
-}
+
+#[derive(Serialize, Deserialize)]
+pub struct Signature(p256::ecdsa::Signature);
 
 impl Signature {
     pub fn verify(&self, data: &[u8], public_key: &PublicKey) -> bool {
-        public_key.verifying_key().verify(data, &self.sig).is_ok()
+        public_key.verifying_key().verify(data, &self.0).is_ok()
     }
 }
 

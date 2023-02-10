@@ -2,8 +2,11 @@ use super::common::from_bytes;
 use std::fmt::Display;
 
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub struct Hash([u8; 32]);
 
 impl Display for Hash {
