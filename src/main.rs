@@ -13,6 +13,8 @@ mod types;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let mut tr_local = Box::new(network::LocalTransport::new("LOCAL".into()));
     let mut tr_remote = Box::new(network::LocalTransport::new("REMOTE".into()));
 

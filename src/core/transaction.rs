@@ -7,14 +7,14 @@ use crate::crypto::{PrivateKey, PublicKey, Signature};
 pub struct Transaction {
     pub data: Vec<u8>,
 
-    pub public_key: Option<PublicKey>,
+    pub from: Option<PublicKey>,
     pub signature: Option<Signature>,
 }
 
 impl Transaction {
     pub fn sign(&mut self, private_key: &PrivateKey) {
         let data = self.data.clone();
-        self.public_key = Some(private_key.public_key());
+        self.from = Some(private_key.public_key());
         self.signature = Some(private_key.sign(&data));
     }
 
@@ -25,15 +25,28 @@ impl Transaction {
             .ok_or_else(|| anyhow!("transaction has no signature"))?;
 
         let pub_key = self
-            .public_key
+            .from
             .as_ref()
-            .ok_or_else(|| anyhow!("public_key has no signature"))?;
+            .ok_or_else(|| anyhow!("from has no signature"))?;
 
         if !sig.verify(&self.data, pub_key) {
             return Err(anyhow!("transaction has invalid signature"));
         }
 
         Ok(())
+    }
+
+    pub fn random_with_signature() -> Transaction {
+        let private_key = PrivateKey::generate();
+
+        let mut tx = Transaction {
+            data: b"foo".to_vec(),
+            from: None,
+            signature: None,
+        };
+
+        tx.sign(&private_key);
+        tx
     }
 }
 
@@ -46,7 +59,7 @@ mod tests {
     fn test_sign_transaction() {
         let mut tx = Transaction {
             data: vec![1, 2, 3],
-            public_key: None,
+            from: None,
             signature: None,
         };
         let private_key = PrivateKey::generate();
@@ -59,7 +72,7 @@ mod tests {
     fn test_verify_transaction() -> Result<()> {
         let mut tx = Transaction {
             data: vec![1, 2, 3],
-            public_key: None,
+            from: None,
             signature: None,
         };
         let private_key = PrivateKey::generate();
@@ -67,7 +80,7 @@ mod tests {
         tx.verify()?;
 
         let other_private_key = PrivateKey::generate();
-        tx.public_key = Some(other_private_key.public_key());
+        tx.from = Some(other_private_key.public_key());
         assert!(tx.verify().is_err());
 
         Ok(())

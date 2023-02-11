@@ -1,4 +1,6 @@
-use super::block::Block;
+use std::io::Read;
+
+use super::block::Header;
 use crate::types::Hash;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
@@ -12,9 +14,9 @@ where
 
 pub struct BlockHasher;
 
-impl Hasher<Block> for BlockHasher {
-    fn hash(&self, block: &Block) -> Result<Hash> {
-        let bytes = block.header_bytes()?;
+impl Hasher<Header> for BlockHasher {
+    fn hash(&self, header: &Header) -> Result<Hash> {
+        let bytes = header.bytes()?;
         let hash = Hash::from_bytes(Sha256::digest(&bytes).as_slice());
         Ok(hash)
     }
