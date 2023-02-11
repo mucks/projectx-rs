@@ -11,18 +11,18 @@ use super::{
     transaction::Transaction,
 };
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Header {
     version: u32,
     data_hash: Hash,
     prev_block_hash: Hash,
     timestamp: u64,
-    height: u32,
+    pub height: u32,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Block {
-    header: Header,
+    pub header: Header,
     txs: Vec<Transaction>,
     validator: Option<PublicKey>,
     signature: Option<Signature>,
@@ -91,25 +91,14 @@ impl Block {
     pub fn decode(&mut self, r: Box<dyn std::io::Read>, dec: Box<dyn Decoder<Self>>) -> Result<()> {
         dec.decode(r, self)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::core::hasher::BlockHasher;
-    use anyhow::Result;
-    use rand::RngCore;
-    use std::time::Instant;
-
-    use super::*;
-
-    fn random_block(height: u32) -> Block {
-        let mut rng = rand::thread_rng();
+    pub fn random(height: u32) -> Block {
         let mut txs = vec![];
         let header = Header {
             version: 1,
             data_hash: Hash::random(),
             prev_block_hash: Hash::random(),
-            timestamp: Instant::now().elapsed().as_secs(),
+            timestamp: std::time::Instant::now().elapsed().as_secs(),
             height,
         };
         let tx = Transaction {
@@ -117,12 +106,28 @@ mod tests {
             public_key: None,
             signature: None,
         };
-        Block::new(Header::default(), txs)
+        txs.push(tx);
+
+        Block::new(header, txs)
     }
+
+    pub fn random_with_signature(height: u32) -> Result<Block> {
+        let private_key = PrivateKey::generate();
+        let mut b = Block::random(height);
+        b.sign(&private_key)?;
+        Ok(b)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::hasher::BlockHasher;
+    use anyhow::Result;
 
     #[test]
     fn test_hash_block() {
-        let mut block = random_block(0);
+        let mut block = Block::random(0);
         let hash = block.hash(Box::new(BlockHasher));
         println!("hash: {hash}");
     }
@@ -130,7 +135,7 @@ mod tests {
     #[test]
     fn test_sign_block() -> Result<()> {
         let private_key = PrivateKey::generate();
-        let mut b = random_block(0);
+        let mut b = Block::random(0);
         b.sign(&private_key)?;
         assert!(b.signature.is_some());
 
@@ -139,7 +144,7 @@ mod tests {
     #[test]
     fn test_verify_block() -> Result<()> {
         let private_key = PrivateKey::generate();
-        let mut b = random_block(0);
+        let mut b = Block::random(0);
         b.sign(&private_key)?;
         b.verify()?;
 
