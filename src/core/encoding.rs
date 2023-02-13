@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{de::DeserializeOwned, Serialize};
 use std::io;
 
 use super::Transaction;
@@ -21,8 +22,11 @@ impl<'a> BincodeEncoder<'a> {
     }
 }
 
-impl<'a> Encoder<Transaction> for BincodeEncoder<'a> {
-    fn encode(&mut self, t: &Transaction) -> Result<()> {
+impl<'a, T> Encoder<T> for BincodeEncoder<'a>
+where
+    T: Serialize,
+{
+    fn encode(&mut self, t: &T) -> Result<()> {
         // let w = Box::into_inner(self.w);
         bincode::serialize_into(&mut self.w, t)?;
         Ok(())
@@ -39,8 +43,11 @@ impl<'a> BincodeDecoder<'a> {
     }
 }
 
-impl<'a> Decoder<Transaction> for BincodeDecoder<'a> {
-    fn decode(&mut self, t: &mut Transaction) -> Result<()> {
+impl<'a, T> Decoder<T> for BincodeDecoder<'a>
+where
+    T: DeserializeOwned,
+{
+    fn decode(&mut self, t: &mut T) -> Result<()> {
         // let w = Box::into_inner(self.w);
         *t = bincode::deserialize_from(&mut self.r)?;
         Ok(())

@@ -4,7 +4,12 @@
 // Tx
 // Keypair
 
-use network::{Server, Transport};
+use crate::core::{BincodeEncoder, Transaction};
+
+use anyhow::Result;
+use crypto::PrivateKey;
+use network::{Message, NetAddr, Server, Transport};
+use rand::{thread_rng, Rng};
 
 mod core;
 mod crypto;
@@ -26,10 +31,10 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::task::spawn(async move {
         loop {
-            tr_remote_clone
-                .send_message(tr_local_clone.addr(), b"Hello World".to_vec())
-                .await
-                .unwrap();
+            if let Err(err) = send_transaction(tr_remote_clone.clone(), tr_local_clone.addr()).await
+            {
+                println!("Error: {err}");
+            }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
@@ -41,8 +46,23 @@ async fn main() -> anyhow::Result<()> {
         block_time: None,
     };
 
-    let s = Server::new(opts);
+    let mut s = Server::new(opts);
+
     s.start().await;
 
+    Ok(())
+}
+
+async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
+    let priv_key = PrivateKey::generate();
+    let data = thread_rng().gen::<[u8; 32]>();
+    let mut tx = Transaction::new(data.to_vec());
+    tx.sign(&priv_key);
+    let mut buf: Vec<u8> = Vec::new();
+    tx.encode(&mut BincodeEncoder::new(&mut buf))?;
+
+    let msg = Message::new(network::MessageType::Tx, buf);
+
+    tr.send_message(to, msg.bytes()?).await?;
     Ok(())
 }

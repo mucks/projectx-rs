@@ -22,7 +22,7 @@ pub struct Transaction {
     pub hash: Option<Hash>,
     // first_seen is the time when the transaction was first seen locally
     #[serde(skip)]
-    first_seen: u64,
+    first_seen: u128,
 }
 
 impl Transaction {
@@ -36,11 +36,11 @@ impl Transaction {
         }
     }
 
-    pub fn set_first_seen(&mut self, first_seen: u64) {
+    pub fn set_first_seen(&mut self, first_seen: u128) {
         self.first_seen = first_seen;
     }
 
-    pub fn first_seen(&self) -> u64 {
+    pub fn first_seen(&self) -> u128 {
         self.first_seen
     }
 
@@ -94,7 +94,7 @@ impl Transaction {
             from: None,
             signature: None,
             hash: None,
-            first_seen: std::time::Instant::now().elapsed().as_secs(),
+            first_seen: std::time::Instant::now().elapsed().as_nanos(),
         };
 
         tx.sign(&private_key);

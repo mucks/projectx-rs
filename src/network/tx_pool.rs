@@ -91,10 +91,10 @@ mod tests {
     #[test]
     fn test_tx_pool_add_tx() -> Result<()> {
         let mut p = TxPool::new();
-        let tx = Transaction::new(b"foo".to_vec());
+        let mut tx = Transaction::new(b"foo".to_vec());
         p.add(tx)?;
         assert_eq!(p.len(), 1);
-        let tx = Transaction::new(b"foo".to_vec());
+        let mut tx = Transaction::new(b"foo".to_vec());
         p.add(tx)?;
         assert_eq!(p.len(), 1);
 
@@ -111,7 +111,7 @@ mod tests {
 
         for i in 0..tx_len {
             let mut tx = Transaction::new(i.to_le_bytes().to_vec());
-            tx.set_first_seen((i * thread_rng().gen_range(1..1000)) as u64);
+            tx.set_first_seen((i * thread_rng().gen_range(1..1000)) as u128);
             p.add(tx)?;
         }
         assert_eq!(tx_len, p.len());

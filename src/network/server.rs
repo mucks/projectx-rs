@@ -1,20 +1,24 @@
-use anyhow::Result;
-use log::info;
-use std::{sync::Arc, time::Duration};
+use anyhow::{anyhow, Result};
+use log::{error, info};
+use std::{
+    io::Cursor,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
+use crate::{
+    core::{BincodeDecoder, Decoder, Transaction, TxHasher},
+    crypto::PrivateKey,
+};
 use tokio::{
     sync::{mpsc, Mutex},
     time,
 };
 
-use crate::{
-    core::{Hasher, Transaction, TxHasher},
-    crypto::PrivateKey,
-};
-
 use super::{
-    transport::{Rpc, Transport},
+    transport::{NetAddr, Rpc, Transport},
     tx_pool::TxPool,
+    Message, MessageType, RPC,
 };
 
 // Sender can be passed within threads safely and cloned as many times as needed.
@@ -33,7 +37,7 @@ pub struct ServerOpts {
 }
 
 pub struct Server {
-    opts: ServerOpts,
+    pub opts: ServerOpts,
     block_time: Duration,
     mem_pool: TxPool,
     is_validator: bool,
@@ -44,9 +48,11 @@ pub struct Server {
 impl Server {
     pub fn new(opts: ServerOpts) -> Self {
         let mut bt: Duration = Duration::from_secs(5);
+
         if let Some(block_time) = opts.block_time {
             bt = block_time;
         }
+
         Self {
             rpc_channel: new_channel(1024),
             block_time: bt,
@@ -57,13 +63,77 @@ impl Server {
         }
     }
 
-    pub async fn start(&self) {
+    pub fn handle_rpc(&mut self, rpc: &mut RPC) -> Result<()> {
+        let mut msg = Message {
+            header: MessageType::Tx,
+            data: vec![],
+        };
+        let mut dec = BincodeDecoder::new(&mut rpc.payload);
+        dec.decode(&mut msg)
+            .map_err(|err| anyhow!("invalid message header! error: {}", err))?;
+
+        match msg.header {
+            MessageType::Tx => {
+                let mut tx = Transaction::new(vec![]);
+                let mut cursor = Cursor::new(msg.data);
+                let mut dec = BincodeDecoder::new(&mut cursor);
+                dec.decode(&mut tx)?;
+                self.process_transaction(&rpc.from, tx)?;
+            }
+            MessageType::Block => {}
+            _ => {
+                println!("unhandled message type");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn process_transaction(&mut self, net_addr: &NetAddr, mut tx: Transaction) -> Result<()> {
+        tx.verify()?;
+
+        let hash = tx.hash(Box::new(TxHasher))?;
+
+        if self.mem_pool.has(&hash) {
+            info!("mem_pool already contains tx {}", hash);
+        }
+
+        tx.set_first_seen(Instant::now().elapsed().as_nanos());
+
+        info!(
+            "Adding new tx {} to mem_pool (len: {})",
+            hash,
+            self.mem_pool.len()
+        );
+
+        // TODO: broadcast this tx to peers
+
+        self.mem_pool.add(tx)?;
+        Ok(())
+    }
+
+    pub async fn start(&mut self) {
         self.init_transports();
         let mut ticker = time::interval(self.block_time);
 
         loop {
-            if let Some(rpc) = self.rpc_channel.1.lock().await.recv().await {
-                println!("RPC: {rpc:?}\n");
+            let mut opt_rpc: Option<Rpc> = None;
+            {
+                let mut rpc_channel = self.rpc_channel.1.lock().await;
+                opt_rpc = rpc_channel.recv().await;
+            }
+
+            if let Some(mut rpc) = opt_rpc {
+                // info!("Received RPC from {}", rpc.from);
+                let mut cursor = Cursor::new(rpc.payload.as_mut_slice());
+
+                let mut rpc = RPC {
+                    from: rpc.from,
+                    payload: &mut cursor,
+                };
+
+                if let Err(err) = self.handle_rpc(&mut rpc) {
+                    error!("Error: {err}");
+                }
             } else if self.quit_channel.1.lock().await.recv().await.is_some() {
                 break;
             } else {
@@ -79,21 +149,6 @@ impl Server {
 
     fn create_new_block(&self) -> Result<()> {
         println!("Creating a new Block");
-        Ok(())
-    }
-
-    fn handle_transaction(&mut self, mut tx: Transaction) -> Result<()> {
-        tx.verify()?;
-
-        let hash = tx.hash(Box::new(TxHasher))?;
-
-        if self.mem_pool.has(&hash) {
-            info!("mem_pool already contains tx {}", hash);
-        }
-
-        info!("Adding new tx {} to mem_pool", hash);
-
-        self.mem_pool.add(tx)?;
         Ok(())
     }
 
