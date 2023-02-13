@@ -5,6 +5,37 @@ use crate::{
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
+pub struct TxMapSorter<'a> {
+    transactions: Vec<&'a Transaction>,
+}
+
+impl<'a> TxMapSorter<'a> {
+    pub fn new(map: &'a HashMap<Hash, Transaction>) -> TxMapSorter<'a> {
+        let mut transactions = Vec::new();
+        for tx in map.values() {
+            transactions.push(tx);
+        }
+        let mut s = TxMapSorter { transactions };
+        s.sort();
+        s
+    }
+
+    pub fn sort(&mut self) {
+        self.transactions.sort_by_key(|a| a.first_seen());
+    }
+
+    pub fn len(&self) -> usize {
+        self.transactions.len()
+    }
+    pub fn less(&self, i: usize, j: usize) -> bool {
+        self.transactions[i].first_seen() < self.transactions[j].first_seen()
+    }
+
+    pub fn swap(&mut self, i: usize, j: usize) {
+        self.transactions.swap(i, j);
+    }
+}
+
 pub struct TxPool {
     transactions: HashMap<Hash, Transaction>,
 }
@@ -39,10 +70,16 @@ impl TxPool {
     pub fn flush(&mut self) {
         self.transactions = HashMap::new();
     }
+    pub fn transactions(&self) -> Vec<&Transaction> {
+        let s = TxMapSorter::new(&self.transactions);
+        s.transactions
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use rand::{thread_rng, Rng};
+
     use super::*;
 
     #[test]
@@ -63,6 +100,26 @@ mod tests {
 
         p.flush();
         assert_eq!(p.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_transaction() -> Result<()> {
+        let mut p = TxPool::new();
+        let tx_len: usize = 1000;
+
+        for i in 0..tx_len {
+            let mut tx = Transaction::new(i.to_le_bytes().to_vec());
+            tx.set_first_seen((i * thread_rng().gen_range(1..1000)) as u64);
+            p.add(tx)?;
+        }
+        assert_eq!(tx_len, p.len());
+
+        let transactions = p.transactions();
+        for i in 0..tx_len - 1 {
+            assert!(transactions[i].first_seen() <= transactions[i + 1].first_seen());
+        }
 
         Ok(())
     }

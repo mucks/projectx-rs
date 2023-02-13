@@ -91,16 +91,12 @@ impl Block {
         self.transactions.push(tx);
     }
 
-    pub fn encode(
-        &mut self,
-        w: Box<dyn std::io::Write>,
-        enc: Box<dyn Encoder<Self>>,
-    ) -> Result<()> {
-        enc.encode(w, self)
+    pub fn encode(&mut self, mut enc: Box<dyn Encoder<Self>>) -> Result<()> {
+        enc.encode(self)
     }
 
-    pub fn decode(&mut self, r: Box<dyn std::io::Read>, dec: Box<dyn Decoder<Self>>) -> Result<()> {
-        dec.decode(r, self)
+    pub fn decode(&mut self, mut dec: Box<dyn Decoder<Self>>) -> Result<()> {
+        dec.decode(self)
     }
 
     pub fn random(height: u32, prev_block_hash: Hash) -> Block {

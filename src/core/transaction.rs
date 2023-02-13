@@ -6,7 +6,10 @@ use crate::{
     types::Hash,
 };
 
-use super::hasher::Hasher;
+use super::{
+    encoding::{Decoder, Encoder},
+    hasher::Hasher,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct Transaction {
@@ -15,7 +18,11 @@ pub struct Transaction {
     pub from: Option<PublicKey>,
     pub signature: Option<Signature>,
     // cached version of tx hash
+    #[serde(skip)]
     pub hash: Option<Hash>,
+    // first_seen is the time when the transaction was first seen locally
+    #[serde(skip)]
+    first_seen: u64,
 }
 
 impl Transaction {
@@ -25,7 +32,16 @@ impl Transaction {
             from: None,
             signature: None,
             hash: None,
+            first_seen: 0,
         }
+    }
+
+    pub fn set_first_seen(&mut self, first_seen: u64) {
+        self.first_seen = first_seen;
+    }
+
+    pub fn first_seen(&self) -> u64 {
+        self.first_seen
     }
 
     pub fn hash(&mut self, hasher: Box<dyn Hasher<Transaction>>) -> Result<Hash> {
@@ -62,6 +78,14 @@ impl Transaction {
         Ok(())
     }
 
+    pub fn encode(&self, enc: &mut dyn Encoder<Transaction>) -> Result<()> {
+        enc.encode(self)
+    }
+
+    pub fn decode(&mut self, dec: &mut dyn Decoder<Transaction>) -> Result<()> {
+        dec.decode(self)
+    }
+
     pub fn random_with_signature() -> Transaction {
         let private_key = PrivateKey::generate();
 
@@ -70,6 +94,7 @@ impl Transaction {
             from: None,
             signature: None,
             hash: None,
+            first_seen: std::time::Instant::now().elapsed().as_secs(),
         };
 
         tx.sign(&private_key);
@@ -79,6 +104,10 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use crate::core::{BincodeDecoder, BincodeEncoder};
+
     use super::*;
     use anyhow::Result;
 
@@ -101,6 +130,23 @@ mod tests {
         let other_private_key = PrivateKey::generate();
         tx.from = Some(other_private_key.public_key());
         assert!(tx.verify().is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_decode() -> Result<()> {
+        let tx = Transaction::random_with_signature();
+
+        let mut buf: Vec<u8> = vec![];
+        let mut enc = BincodeEncoder::new(&mut buf);
+        tx.encode(&mut enc)?;
+
+        let mut f = Cursor::new(buf);
+        let mut tx_decoded = Transaction::new(vec![]);
+        let mut dec = BincodeDecoder::new(&mut f);
+        tx_decoded.decode(&mut dec)?;
+        assert_eq!(tx.data, tx_decoded.data);
 
         Ok(())
     }

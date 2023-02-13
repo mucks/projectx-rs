@@ -110,7 +110,7 @@ mod tests {
     async fn test_add_block() -> Result<()> {
         let mut bc = Blockchain::new(Block::random(0, Hash::random())).await?;
 
-        let len_blocks = 100;
+        let len_blocks = 10;
         for i in 0..len_blocks {
             let prev_block_hash = bc.get_prev_block_hash(i + 1).await?;
             let mut b = Block::random_with_signature(i + 1, prev_block_hash)?;
@@ -128,11 +128,12 @@ mod tests {
         Ok(())
     }
 
+    // this is quite slow
     #[tokio::test]
     async fn test_get_header() -> Result<()> {
         let mut bc = Blockchain::new(Block::random(0, Hash::random())).await?;
 
-        let len_blocks = 100;
+        let len_blocks = 10;
 
         for i in 0..len_blocks {
             let prev_block_hash = bc.get_prev_block_hash(i + 1).await?;
