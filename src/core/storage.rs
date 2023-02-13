@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-pub trait Storage {
+pub trait Storage: Send + Sync {
     fn put(&self) -> Result<()>;
     fn get(&self) -> Result<()>;
 }

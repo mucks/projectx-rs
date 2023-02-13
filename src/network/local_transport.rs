@@ -5,11 +5,7 @@ It is a simple in-memory transport that does not actually send messages over the
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::{collections::HashMap, ops::Deref, sync::Arc};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    Mutex, RwLock,
-};
+use std::collections::HashMap;
 
 use super::{
     server::{new_channel, Channel},

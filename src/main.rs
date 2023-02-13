@@ -37,6 +37,8 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = network::ServerOpts {
         transports: vec![tr_local],
+        private_key: None,
+        block_time: None,
     };
 
     let s = Server::new(opts);

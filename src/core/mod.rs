@@ -5,3 +5,6 @@ mod hasher;
 mod storage;
 mod transaction;
 mod validator;
+
+pub use hasher::*;
+pub use transaction::Transaction;
