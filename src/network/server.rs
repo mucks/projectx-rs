@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Result};
 use log::{debug, error, info};
 use std::{
-    io::Cursor,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use crate::{
-    core::{BincodeDecoder, BincodeEncoder, Decoder, Transaction, TxHasher},
+    core::{BincodeEncoder, Block, Blockchain, Transaction, TxHasher},
     crypto::PrivateKey,
     network::DecodedMessageData,
+    types::Hash,
 };
 use tokio::{
     sync::{mpsc, Mutex},
@@ -42,13 +42,14 @@ pub struct ServerOpts {
 pub struct Server {
     pub opts: ServerOpts,
     mem_pool: TxPool,
+    chain: Arc<Mutex<Blockchain>>,
     is_validator: bool,
     rpc_channel: Channel<RPC>,
     quit_channel: Channel<()>,
 }
 
 impl Server {
-    pub fn new(mut opts: ServerOpts) -> Self {
+    pub async fn new(mut opts: ServerOpts) -> Result<Self> {
         if opts.block_time.is_none() {
             opts.block_time = Some(Duration::from_secs(5));
         }
@@ -57,18 +58,29 @@ impl Server {
             opts.rpc_decode_fn = Some(Box::new(default_rpc_decode_fn));
         }
 
-        Self {
+        let chain = Arc::new(Mutex::new(Blockchain::new(Block::genesis()).await?));
+
+        Ok(Self {
+            chain,
             rpc_channel: new_channel(1024),
             mem_pool: TxPool::new(),
             quit_channel: new_channel(1),
             is_validator: opts.private_key.is_some(),
             opts,
-        }
+        })
     }
 
     pub async fn start(&mut self) {
         self.init_transports();
-        let mut ticker = time::interval(self.opts.block_time.unwrap());
+
+        if self.is_validator {
+            let block_time = self.opts.block_time.unwrap();
+            let bc = self.chain.clone();
+            let private_key = self.opts.private_key.as_ref().unwrap().clone();
+            tokio::task::spawn(async move {
+                Self::validator_loop(bc, private_key, block_time).await;
+            });
+        }
 
         loop {
             // Waits for an RPC message to arrive and then proccesses it with the dynamic function that's passed
@@ -89,15 +101,32 @@ impl Server {
                 }
             } else if self.quit_channel.1.lock().await.recv().await.is_some() {
                 break;
-            } else {
-                ticker.tick().await;
-                if self.is_validator {
-                    self.create_new_block();
-                }
             }
         }
 
-        println!("Server shutdown");
+        info!("Server is shutting down");
+    }
+
+    pub async fn validator_loop(
+        bc: Arc<Mutex<Blockchain>>,
+        private_key: PrivateKey,
+        block_time: Duration,
+    ) {
+        let mut ticker = time::interval(block_time);
+
+        info!(
+            "Starting validator loop with block_time {}",
+            block_time.as_secs()
+        );
+
+        loop {
+            ticker.tick().await;
+            let mut bc = bc.lock().await;
+            info!("Creating a new block");
+            if let Err(err) = Self::create_new_block(&mut bc, private_key.clone()).await {
+                error!("Error creating a new block: {}", err);
+            }
+        }
     }
 
     pub fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
@@ -184,8 +213,13 @@ impl Server {
         Ok(())
     }
 
-    fn create_new_block(&self) -> Result<()> {
-        println!("Creating a new Block");
+    pub async fn create_new_block(bc: &mut Blockchain, private_key: PrivateKey) -> Result<()> {
+        let prev_header = bc.get_header(bc.height().await).await?;
+        let mut block = Block::from_prev_header(prev_header, vec![])?;
+        info!("Creating new block with height {}", block.header.height);
+        block.sign(&private_key)?;
+        bc.add_block(&mut block).await?;
+
         Ok(())
     }
 

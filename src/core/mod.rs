@@ -7,6 +7,7 @@ mod transaction;
 mod validator;
 
 pub use block::*;
+pub use blockchain::*;
 pub use encoding::*;
 pub use hasher::*;
 pub use transaction::Transaction;

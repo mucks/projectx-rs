@@ -90,30 +90,32 @@ mod tests {
     use super::*;
     use anyhow::Result;
 
+    async fn blockchain() -> Result<Blockchain> {
+        Blockchain::new(Block::random(0, Hash::default())?).await
+    }
+
     #[tokio::test]
     async fn test_blockchain() -> Result<()> {
-        let bc = Blockchain::new(Block::random(0, Hash::default())).await?;
-        assert_eq!(bc.height().await, 0);
+        assert_eq!(blockchain().await?.height().await, 0);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_has_block() -> Result<()> {
-        let bc = Blockchain::new(Block::random(0, Hash::default())).await?;
-        assert!(bc.has_block(0).await);
+        assert!(blockchain().await?.has_block(0).await);
         Ok(())
     }
 
     // this is quite slow, optimize this
     #[tokio::test]
     async fn test_add_block() -> Result<()> {
-        let mut bc = Blockchain::new(Block::random(0, Hash::random())).await?;
+        let mut bc = blockchain().await?;
 
         let len_blocks = 10;
         for i in 0..len_blocks {
             let prev_block_hash = bc.get_prev_block_hash(i + 1).await?;
-            let mut b = Block::random_with_signature(i + 1, prev_block_hash)?;
+            let mut b = Block::random(i + 1, prev_block_hash)?;
             bc.add_block(&mut b).await?;
         }
 
@@ -121,7 +123,7 @@ mod tests {
         assert_eq!(bc.len().await as u32, len_blocks + 1);
 
         assert!(bc
-            .add_block(&mut Block::random(89, Hash::random()))
+            .add_block(&mut Block::random(89, Hash::random())?)
             .await
             .is_err());
 
@@ -131,13 +133,13 @@ mod tests {
     // this is quite slow
     #[tokio::test]
     async fn test_get_header() -> Result<()> {
-        let mut bc = Blockchain::new(Block::random(0, Hash::random())).await?;
+        let mut bc = blockchain().await?;
 
         let len_blocks = 10;
 
         for i in 0..len_blocks {
             let prev_block_hash = bc.get_prev_block_hash(i + 1).await?;
-            let mut b = Block::random_with_signature(i + 1, prev_block_hash)?;
+            let mut b = Block::random(i + 1, prev_block_hash)?;
             bc.add_block(&mut b).await?;
             let header = bc.get_header(i + 1).await?;
             assert_eq!(header, b.header);
@@ -147,14 +149,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_block_too_high() -> Result<()> {
-        let mut bc = Blockchain::new(Block::random(0, Hash::random())).await?;
-        bc.add_block(&mut Block::random_with_signature(
-            1,
-            bc.get_prev_block_hash(1).await?,
-        )?)
-        .await?;
+        let mut bc = blockchain().await?;
+        bc.add_block(&mut Block::random(1, bc.get_prev_block_hash(1).await?)?)
+            .await?;
         assert!(bc
-            .add_block(&mut Block::random_with_signature(3, Hash::random())?)
+            .add_block(&mut Block::random(3, Hash::random())?)
             .await
             .is_err());
 

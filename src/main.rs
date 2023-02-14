@@ -40,14 +40,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let priv_key = PrivateKey::generate();
+
     let opts = network::ServerOpts {
         transports: vec![tr_local],
-        private_key: None,
+        private_key: Some(priv_key),
         block_time: None,
         rpc_decode_fn: None,
     };
 
-    let mut s = Server::new(opts);
+    let mut s = Server::new(opts).await?;
 
     s.start().await;
 

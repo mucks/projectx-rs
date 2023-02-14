@@ -1,14 +1,18 @@
+use std::time::Instant;
+
 use crate::{
     crypto::{PrivateKey, PublicKey, Signature},
     types::Hash,
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{
     encoding::{Decoder, Encoder},
     hasher::Hasher,
     transaction::Transaction,
+    BincodeEncoder, BlockHasher,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,7 +20,7 @@ pub struct Header {
     version: u32,
     data_hash: Hash,
     pub prev_block_hash: Hash,
-    timestamp: u64,
+    timestamp: u128,
     pub height: u32,
 }
 
@@ -37,14 +41,28 @@ impl Header {
 }
 
 impl Block {
-    pub fn new(h: Header, txs: Vec<Transaction>) -> Self {
+    pub fn new(h: Header, txx: Vec<Transaction>) -> Self {
         Self {
             header: h,
-            transactions: txs,
+            transactions: txx,
             validator: None,
             signature: None,
             hash: Hash::default(),
         }
+    }
+
+    pub fn from_prev_header(ph: Header, txx: Vec<Transaction>) -> Result<Self> {
+        let data_hash = calculate_data_hash(&txx)?;
+
+        let header = Header {
+            version: ph.version,
+            data_hash,
+            prev_block_hash: BlockHasher {}.hash(&ph)?,
+            timestamp: Instant::now().elapsed().as_nanos(),
+            height: ph.height + 1,
+        };
+
+        Ok(Self::new(header, txx))
     }
 
     pub fn hash(&mut self, hasher: Box<dyn Hasher<Header>>) -> Hash {
@@ -66,7 +84,7 @@ impl Block {
         Ok(())
     }
 
-    pub fn verify(&self) -> Result<()> {
+    pub fn verify(&mut self) -> Result<()> {
         let sig = self
             .signature
             .as_ref()
@@ -84,6 +102,12 @@ impl Block {
             tx.verify()?;
         }
 
+        let data_hash = calculate_data_hash(&self.transactions)?;
+
+        if data_hash != self.header.data_hash {
+            return Err(anyhow!("block has invalid data hash {}", data_hash));
+        }
+
         Ok(())
     }
 
@@ -99,26 +123,49 @@ impl Block {
         dec.decode(self)
     }
 
-    pub fn random(height: u32, prev_block_hash: Hash) -> Block {
+    pub fn genesis() -> Block {
         let header = Header {
             version: 1,
             data_hash: Hash::random(),
-            prev_block_hash,
-            timestamp: std::time::Instant::now().elapsed().as_secs(),
-            height,
+            prev_block_hash: Hash::default(),
+            timestamp: std::time::Instant::now().elapsed().as_nanos(),
+            height: 0,
         };
 
         Block::new(header, vec![])
     }
 
-    pub fn random_with_signature(height: u32, prev_block_hash: Hash) -> Result<Block> {
+    pub fn random(height: u32, prev_block_hash: Hash) -> Result<Block> {
         let private_key = PrivateKey::generate();
-        let mut b = Block::random(height, prev_block_hash);
         let tx = Transaction::random_with_signature();
-        b.add_transaction(tx);
+
+        let header = Header {
+            version: 1,
+            data_hash: Hash::random(),
+            prev_block_hash,
+            timestamp: std::time::Instant::now().elapsed().as_nanos(),
+            height,
+        };
+
+        let mut b = Block::new(header, vec![tx]);
+        let data_hash = calculate_data_hash(&b.transactions)?;
+        b.header.data_hash = data_hash;
         b.sign(&private_key)?;
+
         Ok(b)
     }
+}
+
+pub fn calculate_data_hash(txx: &Vec<Transaction>) -> Result<Hash> {
+    let mut buf: Vec<u8> = vec![];
+
+    for tx in txx {
+        tx.encode(&mut BincodeEncoder::new(&mut buf))?;
+    }
+
+    let hash = Sha256::digest(buf.as_slice());
+
+    Ok(Hash::from_bytes(&hash))
 }
 
 #[cfg(test)]
@@ -128,16 +175,17 @@ mod tests {
     use anyhow::Result;
 
     #[test]
-    fn test_hash_block() {
-        let mut block = Block::random(0, Hash::default());
+    fn test_hash_block() -> Result<()> {
+        let mut block = Block::random(0, Hash::default())?;
         let hash = block.hash(Box::new(BlockHasher));
         println!("hash: {hash}");
+        Ok(())
     }
 
     #[test]
     fn test_sign_block() -> Result<()> {
         let private_key = PrivateKey::generate();
-        let mut b = Block::random(0, Hash::default());
+        let mut b = Block::random(0, Hash::default())?;
         b.sign(&private_key)?;
         assert!(b.signature.is_some());
 
@@ -146,7 +194,7 @@ mod tests {
     #[test]
     fn test_verify_block() -> Result<()> {
         let private_key = PrivateKey::generate();
-        let mut b = Block::random(0, Hash::default());
+        let mut b = Block::random(0, Hash::default())?;
         b.sign(&private_key)?;
         b.verify()?;
 
