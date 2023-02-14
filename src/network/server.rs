@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use log::{error, info};
+use log::{debug, error, info};
 use std::{
     io::Cursor,
     sync::Arc,
@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    core::{BincodeDecoder, Decoder, Transaction, TxHasher},
+    core::{BincodeDecoder, BincodeEncoder, Decoder, Transaction, TxHasher},
     crypto::PrivateKey,
     network::DecodedMessageData,
 };
@@ -79,7 +79,7 @@ impl Server {
                 if let Some(rpc_decode_fn) = self.opts.rpc_decode_fn.as_mut() {
                     match rpc_decode_fn(rpc) {
                         Ok(msg) => {
-                            info!("RPC Message incoming from: {} ", msg.from);
+                            debug!("RPC Message incoming from: {} ", msg.from);
                             if let Err(err) = self.process_message(msg) {
                                 error!("error processing message: {}", err);
                             };
@@ -99,6 +99,7 @@ impl Server {
 
         println!("Server shutdown");
     }
+
     pub fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
         match msg.data {
             DecodedMessageData::Tx(tx) => {
@@ -110,6 +111,43 @@ impl Server {
                 println!("Received a new Block");
             }
         }
+        Ok(())
+    }
+    // find some way to not have to clone the payload
+    pub async fn broadcast(&self, payload: Vec<u8>) -> Result<()> {
+        for tr in &self.opts.transports {
+            tr.broadcast(payload.clone()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_tx(&self, tx: &Transaction) -> Result<()> {
+        let mut buf: Vec<u8> = Vec::new();
+        tx.encode(&mut BincodeEncoder::new(&mut buf))?;
+
+        let msg = Message::new(MessageType::Tx, buf);
+        self.broadcast(msg.bytes()?).await?;
+        //let buf: Vec<u8> = Vec::new();
+        Ok(())
+    }
+
+    pub async fn broadcast_sync(transports: &[Box<dyn Transport>], payload: Vec<u8>) -> Result<()> {
+        for tr in transports {
+            tr.broadcast(payload.clone()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_tx_sync(
+        transports: &[Box<dyn Transport>],
+        tx: &Transaction,
+    ) -> Result<()> {
+        let mut buf: Vec<u8> = Vec::new();
+        tx.encode(&mut BincodeEncoder::new(&mut buf))?;
+
+        let msg = Message::new(MessageType::Tx, buf);
+        Self::broadcast_sync(transports, msg.bytes()?).await?;
+        //let buf: Vec<u8> = Vec::new();
         Ok(())
     }
 
@@ -132,7 +170,17 @@ impl Server {
 
         // TODO: broadcast this tx to peers
 
+        let transports = self.opts.transports.clone();
+        let tx_clone = tx.clone();
+
+        tokio::task::spawn(async move {
+            if let Err(err) = Self::broadcast_tx_sync(&transports, &tx_clone).await {
+                error!("Error broadcasting tx: {err}");
+            }
+        });
+
         self.mem_pool.add(tx)?;
+
         Ok(())
     }
 

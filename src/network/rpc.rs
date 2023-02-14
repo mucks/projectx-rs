@@ -1,14 +1,15 @@
 // currently not using these traits because i couldn't get it to work with mutable references
 
-use std::io::Cursor;
+use std::{io::Cursor, sync::Arc};
 
 use crate::core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Transaction};
 
 use super::transport::NetAddr;
 use anyhow::{anyhow, Result};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum MessageType {
     Tx,
     Block,
@@ -30,7 +31,7 @@ pub struct DecodedMessage {
     pub data: DecodedMessageData,
 }
 
-pub type RPCDecodeFn = Box<dyn FnMut(RPC) -> Result<DecodedMessage>>;
+pub type RPCDecodeFn = Box<dyn Fn(RPC) -> Result<DecodedMessage> + Send + Sync>;
 
 pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
     let mut msg = Message {
@@ -40,8 +41,14 @@ pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
 
     let mut cursor = Cursor::new(&mut rpc.payload);
     let mut dec = BincodeDecoder::new(&mut cursor);
+
     dec.decode(&mut msg)
         .map_err(|err| anyhow!("invalid message header! error: {}", err))?;
+
+    debug!(
+        "new incoming message from {} of type : {:?}",
+        rpc.from, msg.header
+    );
 
     match msg.header {
         MessageType::Tx => {

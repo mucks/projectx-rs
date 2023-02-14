@@ -11,7 +11,7 @@ use super::{
     hasher::Hasher,
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Transaction {
     pub data: Vec<u8>,
 
