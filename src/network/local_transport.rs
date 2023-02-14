@@ -9,13 +9,14 @@ use std::collections::HashMap;
 
 use super::{
     server::{new_channel, Channel},
-    transport::{NetAddr, Rpc, Transport},
+    transport::{NetAddr, Transport},
+    RPC,
 };
 
 #[derive(Debug, Clone)]
 pub struct LocalTransport {
     addr: NetAddr,
-    consume_channel: Channel<Rpc>,
+    consume_channel: Channel<RPC>,
     peers: HashMap<NetAddr, Box<dyn Transport>>,
 }
 
@@ -31,11 +32,11 @@ impl LocalTransport {
 
 #[async_trait]
 impl Transport for LocalTransport {
-    fn consume(&self) -> Channel<Rpc> {
+    fn consume(&self) -> Channel<RPC> {
         self.consume_channel.clone()
     }
 
-    async fn recv(&self) -> Option<Rpc> {
+    async fn recv(&self) -> Option<RPC> {
         self.consume_channel.1.lock().await.recv().await
     }
 
@@ -44,20 +45,27 @@ impl Transport for LocalTransport {
         Ok(())
     }
 
-    async fn send_message(&self, to: NetAddr, payload: Vec<u8>) -> Result<()> {
+    async fn send_message(&self, to: &NetAddr, payload: Vec<u8>) -> Result<()> {
         let peer =
             self.peers
-                .get(&to)
+                .get(to)
                 .ok_or(anyhow!("{} could not send message to {}", self.addr, to))?;
 
         peer.consume()
             .0
-            .send(Rpc {
+            .send(RPC {
                 from: self.addr.clone(),
                 payload,
             })
             .await?;
 
+        Ok(())
+    }
+
+    async fn broadcast(&self, payload: Vec<u8>) -> Result<()> {
+        for peer in &self.peers {
+            self.send_message(peer.0, payload.clone()).await?;
+        }
         Ok(())
     }
 
@@ -93,11 +101,32 @@ mod tests {
         tr_b.connect(Box::new(tr_a.clone())).await?;
 
         let msg = b"hello world!".to_vec();
-        tr_a.send_message(tr_b.addr(), msg.clone()).await?;
+        tr_a.send_message(&tr_b.addr(), msg.clone()).await?;
 
         let rpc = tr_b.recv().await.unwrap();
         assert_eq!(rpc.from, tr_a.addr());
-        assert_eq!(rpc.payload, msg.to_vec());
+        assert_eq!(rpc.payload, msg);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_broadcast() -> Result<()> {
+        let mut tr_a = LocalTransport::new("A".into());
+        let tr_b = LocalTransport::new("B".into());
+        let tr_c = LocalTransport::new("C".into());
+
+        tr_a.connect(Box::new(tr_b.clone())).await?;
+        tr_a.connect(Box::new(tr_c.clone())).await?;
+
+        let msg = b"foo".to_vec();
+        tr_a.broadcast(msg.clone()).await?;
+
+        let rpc_b = tr_b.recv().await.unwrap();
+        assert_eq!(rpc_b.payload, msg);
+
+        let rpc_c = tr_c.recv().await.unwrap();
+        assert_eq!(rpc_c.payload, msg);
 
         Ok(())
     }

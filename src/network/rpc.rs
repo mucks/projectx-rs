@@ -1,21 +1,62 @@
 // currently not using these traits because i couldn't get it to work with mutable references
 
-use crate::core::{BincodeDecoder, BincodeEncoder, Decoder, Encoder, Transaction};
+use std::io::Cursor;
+
+use crate::core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Transaction};
 
 use super::transport::NetAddr;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
 pub enum MessageType {
     Tx,
     Block,
-    Other(u64),
 }
 
-pub struct RPC<'a> {
+#[derive(Debug, Clone)]
+pub struct RPC {
     pub from: NetAddr,
-    pub payload: &'a mut dyn std::io::Read,
+    pub payload: Vec<u8>,
+}
+
+pub enum DecodedMessageData {
+    Tx(Transaction),
+    Block(Block),
+}
+
+pub struct DecodedMessage {
+    pub from: NetAddr,
+    pub data: DecodedMessageData,
+}
+
+pub type RPCDecodeFn = Box<dyn FnMut(RPC) -> Result<DecodedMessage>>;
+
+pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
+    let mut msg = Message {
+        header: MessageType::Tx,
+        data: vec![],
+    };
+
+    let mut cursor = Cursor::new(&mut rpc.payload);
+    let mut dec = BincodeDecoder::new(&mut cursor);
+    dec.decode(&mut msg)
+        .map_err(|err| anyhow!("invalid message header! error: {}", err))?;
+
+    match msg.header {
+        MessageType::Tx => {
+            let mut tx = Transaction::new(vec![]);
+            let mut cursor = Cursor::new(&mut msg.data);
+            let mut dec = BincodeDecoder::new(&mut cursor);
+            dec.decode(&mut tx)?;
+            Ok(DecodedMessage {
+                from: rpc.from.clone(),
+                data: DecodedMessageData::Tx(tx),
+            })
+        }
+        // MessageType::Block => {}
+        _ => Err(anyhow!("unhandled message type")),
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -47,31 +88,6 @@ pub struct DefaultRPCHandler<'a> {
 impl<'a> DefaultRPCHandler<'a> {
     pub fn new(p: &'a mut dyn RPCProcessor) -> Self {
         Self { p }
-    }
-}
-
-impl<'a> RPCHandler for DefaultRPCHandler<'a> {
-    fn handle_rpc(&mut self, rpc: &mut RPC) -> Result<()> {
-        let mut msg = Message {
-            header: MessageType::Tx,
-            data: vec![],
-        };
-        let mut dec = BincodeDecoder::new(&mut rpc.payload);
-        dec.decode(&mut msg)?;
-
-        match msg.header {
-            MessageType::Tx => {
-                let mut tx = Transaction::new(vec![]);
-                let mut dec = BincodeDecoder::new(&mut rpc.payload);
-                dec.decode(&mut tx)?;
-                self.p.process_transaction(&rpc.from, tx)?;
-            }
-            MessageType::Block => {}
-            _ => {
-                println!("unhandled message type");
-            }
-        }
-        Ok(())
     }
 }
 

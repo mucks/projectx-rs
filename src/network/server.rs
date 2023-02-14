@@ -9,6 +9,7 @@ use std::{
 use crate::{
     core::{BincodeDecoder, Decoder, Transaction, TxHasher},
     crypto::PrivateKey,
+    network::DecodedMessageData,
 };
 use tokio::{
     sync::{mpsc, Mutex},
@@ -16,9 +17,10 @@ use tokio::{
 };
 
 use super::{
-    transport::{NetAddr, Rpc, Transport},
+    default_rpc_decode_fn,
+    transport::{NetAddr, Transport},
     tx_pool::TxPool,
-    Message, MessageType, RPC,
+    DecodedMessage, Message, MessageType, RPCDecodeFn, RPC,
 };
 
 // Sender can be passed within threads safely and cloned as many times as needed.
@@ -31,6 +33,7 @@ pub fn new_channel<T>(buffer_size: usize) -> Channel<T> {
 }
 
 pub struct ServerOpts {
+    pub rpc_decode_fn: Option<RPCDecodeFn>,
     pub transports: Vec<Box<dyn Transport>>,
     pub private_key: Option<PrivateKey>,
     pub block_time: Option<Duration>,
@@ -38,24 +41,24 @@ pub struct ServerOpts {
 
 pub struct Server {
     pub opts: ServerOpts,
-    block_time: Duration,
     mem_pool: TxPool,
     is_validator: bool,
-    rpc_channel: Channel<Rpc>,
+    rpc_channel: Channel<RPC>,
     quit_channel: Channel<()>,
 }
 
 impl Server {
-    pub fn new(opts: ServerOpts) -> Self {
-        let mut bt: Duration = Duration::from_secs(5);
+    pub fn new(mut opts: ServerOpts) -> Self {
+        if opts.block_time.is_none() {
+            opts.block_time = Some(Duration::from_secs(5));
+        }
 
-        if let Some(block_time) = opts.block_time {
-            bt = block_time;
+        if opts.rpc_decode_fn.is_none() {
+            opts.rpc_decode_fn = Some(Box::new(default_rpc_decode_fn));
         }
 
         Self {
             rpc_channel: new_channel(1024),
-            block_time: bt,
             mem_pool: TxPool::new(),
             quit_channel: new_channel(1),
             is_validator: opts.private_key.is_some(),
@@ -63,26 +66,48 @@ impl Server {
         }
     }
 
-    pub fn handle_rpc(&mut self, rpc: &mut RPC) -> Result<()> {
-        let mut msg = Message {
-            header: MessageType::Tx,
-            data: vec![],
-        };
-        let mut dec = BincodeDecoder::new(&mut rpc.payload);
-        dec.decode(&mut msg)
-            .map_err(|err| anyhow!("invalid message header! error: {}", err))?;
+    pub async fn start(&mut self) {
+        self.init_transports();
+        let mut ticker = time::interval(self.opts.block_time.unwrap());
 
-        match msg.header {
-            MessageType::Tx => {
-                let mut tx = Transaction::new(vec![]);
-                let mut cursor = Cursor::new(msg.data);
-                let mut dec = BincodeDecoder::new(&mut cursor);
-                dec.decode(&mut tx)?;
-                self.process_transaction(&rpc.from, tx)?;
+        loop {
+            // Waits for an RPC message to arrive and then proccesses it with the dynamic function that's passed
+            let opt_rpc =
+                (|| async { return self.rpc_channel.1.lock().await.recv().await })().await;
+
+            if let Some(rpc) = opt_rpc {
+                if let Some(rpc_decode_fn) = self.opts.rpc_decode_fn.as_mut() {
+                    match rpc_decode_fn(rpc) {
+                        Ok(msg) => {
+                            info!("RPC Message incoming from: {} ", msg.from);
+                            if let Err(err) = self.process_message(msg) {
+                                error!("error processing message: {}", err);
+                            };
+                        }
+                        Err(err) => error!("RPC Decoding Error: {err}"),
+                    }
+                }
+            } else if self.quit_channel.1.lock().await.recv().await.is_some() {
+                break;
+            } else {
+                ticker.tick().await;
+                if self.is_validator {
+                    self.create_new_block();
+                }
             }
-            MessageType::Block => {}
-            _ => {
-                println!("unhandled message type");
+        }
+
+        println!("Server shutdown");
+    }
+    pub fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
+        match msg.data {
+            DecodedMessageData::Tx(tx) => {
+                if let Err(err) = self.process_transaction(&msg.from, tx) {
+                    error!("Error processing transaction: {err}");
+                };
+            }
+            DecodedMessageData::Block(block) => {
+                println!("Received a new Block");
             }
         }
         Ok(())
@@ -109,42 +134,6 @@ impl Server {
 
         self.mem_pool.add(tx)?;
         Ok(())
-    }
-
-    pub async fn start(&mut self) {
-        self.init_transports();
-        let mut ticker = time::interval(self.block_time);
-
-        loop {
-            let mut opt_rpc: Option<Rpc> = None;
-            {
-                let mut rpc_channel = self.rpc_channel.1.lock().await;
-                opt_rpc = rpc_channel.recv().await;
-            }
-
-            if let Some(mut rpc) = opt_rpc {
-                // info!("Received RPC from {}", rpc.from);
-                let mut cursor = Cursor::new(rpc.payload.as_mut_slice());
-
-                let mut rpc = RPC {
-                    from: rpc.from,
-                    payload: &mut cursor,
-                };
-
-                if let Err(err) = self.handle_rpc(&mut rpc) {
-                    error!("Error: {err}");
-                }
-            } else if self.quit_channel.1.lock().await.recv().await.is_some() {
-                break;
-            } else {
-                ticker.tick().await;
-                if self.is_validator {
-                    self.create_new_block();
-                }
-            }
-        }
-
-        println!("Server shutdown");
     }
 
     fn create_new_block(&self) -> Result<()> {

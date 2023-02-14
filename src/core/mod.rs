@@ -6,6 +6,7 @@ mod storage;
 mod transaction;
 mod validator;
 
+pub use block::*;
 pub use encoding::*;
 pub use hasher::*;
 pub use transaction::Transaction;

@@ -44,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         transports: vec![tr_local],
         private_key: None,
         block_time: None,
+        rpc_decode_fn: None,
     };
 
     let mut s = Server::new(opts);
@@ -63,6 +64,6 @@ async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
 
     let msg = Message::new(network::MessageType::Tx, buf);
 
-    tr.send_message(to, msg.bytes()?).await?;
+    tr.send_message(&to, msg.bytes()?).await?;
     Ok(())
 }

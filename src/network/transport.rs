@@ -8,22 +8,17 @@ use std::fmt::Debug;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::server::Channel;
+use super::{server::Channel, RPC};
 
 pub type NetAddr = String;
 
-#[derive(Debug, Clone)]
-pub struct Rpc {
-    pub from: NetAddr,
-    pub payload: Vec<u8>,
-}
-
 #[async_trait]
 pub trait Transport: TransportClone + Send + Sync + Debug {
-    fn consume(&self) -> Channel<Rpc>;
-    async fn recv(&self) -> Option<Rpc>;
+    fn consume(&self) -> Channel<RPC>;
+    async fn recv(&self) -> Option<RPC>;
     async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()>;
-    async fn send_message(&self, to: NetAddr, payload: Vec<u8>) -> Result<()>;
+    async fn send_message(&self, to: &NetAddr, payload: Vec<u8>) -> Result<()>;
+    async fn broadcast(&self, payload: Vec<u8>) -> Result<()>;
     fn addr(&self) -> NetAddr;
 }
 
