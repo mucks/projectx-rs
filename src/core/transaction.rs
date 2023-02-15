@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use log::debug;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,7 @@ impl Transaction {
     pub fn calculate_and_cache_hash(&mut self, hasher: Box<dyn Hasher<Transaction>>) -> Result<()> {
         if self.hash.is_none() {
             self.hash = Some(hasher.hash(self)?);
+            debug!("calculated hash for transaction: {}", self.hash.unwrap());
         }
         Ok(())
     }

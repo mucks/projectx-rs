@@ -2,7 +2,7 @@
 
 use std::{io::Cursor, sync::Arc};
 
-use crate::core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Transaction};
+use crate::core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Header, Transaction};
 
 use super::transport::NetAddr;
 use anyhow::{anyhow, Result};
@@ -59,6 +59,16 @@ pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
             Ok(DecodedMessage {
                 from: rpc.from.clone(),
                 data: DecodedMessageData::Tx(tx),
+            })
+        }
+        MessageType::Block => {
+            let mut block = Block::new(Header::default(), vec![]);
+            let mut cursor = Cursor::new(&mut msg.data);
+            let mut dec = BincodeDecoder::new(&mut cursor);
+            dec.decode(&mut block)?;
+            Ok(DecodedMessage {
+                from: rpc.from.clone(),
+                data: DecodedMessageData::Block(block),
             })
         }
         // MessageType::Block => {}

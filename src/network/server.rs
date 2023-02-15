@@ -65,7 +65,7 @@ impl Server {
         Ok(Self {
             chain,
             rpc_channel: new_channel(1024),
-            mem_pool: Arc::new(Mutex::new(TxPool::new(1000))),
+            mem_pool: Arc::new(Mutex::new(TxPool::new(100))),
             quit_channel: new_channel(1),
             is_validator: opts.private_key.is_some(),
             opts,
@@ -147,11 +147,13 @@ impl Server {
         match msg.data {
             DecodedMessageData::Tx(tx) => {
                 if let Err(err) = self.process_transaction(&msg.from, tx).await {
-                    error!("Error processing transaction: {err}");
+                    error!("ID={} Error processing transaction: {err}", self.opts.id);
                 };
             }
             DecodedMessageData::Block(block) => {
-                println!("Received a new Block");
+                if let Err(err) = self.process_block(block).await {
+                    error!("ID={} Error processing block: {err}", self.opts.id)
+                }
             }
         }
         Ok(())
@@ -185,12 +187,28 @@ impl Server {
         Ok(())
     }
 
+    pub async fn process_block(&mut self, mut block: Block) -> Result<()> {
+        {
+            self.chain.lock().await.add_block(&mut block).await?;
+        }
+
+        let transports = self.opts.transports.clone();
+
+        tokio::task::spawn(async move {
+            if let Err(err) = Self::broadcast_block(&transports, &block).await {
+                error!("Error broadcasting block: {err}");
+            }
+        });
+
+        Ok(())
+    }
+
     pub async fn process_transaction(
         &mut self,
         net_addr: &NetAddr,
         mut tx: Transaction,
     ) -> Result<()> {
-        tx.calculate_and_cache_hash(Box::new(TxHasher));
+        tx.calculate_and_cache_hash(Box::new(TxHasher))?;
 
         let hash = tx.hash();
         let mut mem_pool = self.mem_pool.lock().await;
@@ -204,9 +222,10 @@ impl Server {
         tx.set_first_seen(Instant::now().elapsed().as_nanos());
 
         info!(
-            "Adding new tx {} to mem_pool (len: {})",
+            "ID={} Adding new tx {} to mem_pool (pending_count: {})",
+            self.opts.id,
             hash,
-            mem_pool.len()
+            mem_pool.pending_count()
         );
 
         // TODO: broadcast this tx to peers
@@ -246,11 +265,12 @@ impl Server {
         bc.add_block(&mut block).await?;
 
         //TODO: pending pool of tx should only reflect on validator nodes
+        // Right now "normal nodes" don't have their pending pool cleared
         tx_pool.clear_pending();
 
         tokio::task::spawn(async move {
             if let Err(err) = Self::broadcast_block(&transports, &block).await {
-                error!("Error broadcasting tx: {err}");
+                error!("Error broadcasting block: {err}");
             }
         });
 
