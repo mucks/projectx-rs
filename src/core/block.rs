@@ -24,10 +24,10 @@ pub struct Header {
     pub height: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
     pub header: Header,
-    transactions: Vec<Transaction>,
+    pub transactions: Vec<Transaction>,
     validator: Option<PublicKey>,
     signature: Option<Signature>,
     // Cached version of the header hash

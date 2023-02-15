@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    core::{BincodeEncoder, Block, Blockchain, Transaction, TxHasher},
+    core::{BincodeEncoder, Block, BlockHasher, Blockchain, Transaction, TxHasher},
     crypto::PrivateKey,
     network::DecodedMessageData,
     types::Hash,
@@ -37,11 +37,12 @@ pub struct ServerOpts {
     pub transports: Vec<Box<dyn Transport>>,
     pub private_key: Option<PrivateKey>,
     pub block_time: Option<Duration>,
+    pub id: String,
 }
 
 pub struct Server {
     pub opts: ServerOpts,
-    mem_pool: TxPool,
+    mem_pool: Arc<Mutex<TxPool>>,
     chain: Arc<Mutex<Blockchain>>,
     is_validator: bool,
     rpc_channel: Channel<RPC>,
@@ -63,7 +64,7 @@ impl Server {
         Ok(Self {
             chain,
             rpc_channel: new_channel(1024),
-            mem_pool: TxPool::new(),
+            mem_pool: Arc::new(Mutex::new(TxPool::new())),
             quit_channel: new_channel(1),
             is_validator: opts.private_key.is_some(),
             opts,
@@ -77,8 +78,10 @@ impl Server {
             let block_time = self.opts.block_time.unwrap();
             let bc = self.chain.clone();
             let private_key = self.opts.private_key.as_ref().unwrap().clone();
+            let tx_pool = self.mem_pool.clone();
+            let id = self.opts.id.clone();
             tokio::task::spawn(async move {
-                Self::validator_loop(bc, private_key, block_time).await;
+                Self::validator_loop(&id, bc, tx_pool, private_key, block_time).await;
             });
         }
 
@@ -92,7 +95,7 @@ impl Server {
                     match rpc_decode_fn(rpc) {
                         Ok(msg) => {
                             debug!("RPC Message incoming from: {} ", msg.from);
-                            if let Err(err) = self.process_message(msg) {
+                            if let Err(err) = self.process_message(msg).await {
                                 error!("error processing message: {}", err);
                             };
                         }
@@ -108,7 +111,9 @@ impl Server {
     }
 
     pub async fn validator_loop(
+        id: &str,
         bc: Arc<Mutex<Blockchain>>,
+        tx_pool: Arc<Mutex<TxPool>>,
         private_key: PrivateKey,
         block_time: Duration,
     ) {
@@ -122,17 +127,20 @@ impl Server {
         loop {
             ticker.tick().await;
             let mut bc = bc.lock().await;
+            let mut tx_pool = tx_pool.lock().await;
             info!("Creating a new block");
-            if let Err(err) = Self::create_new_block(&mut bc, private_key.clone()).await {
+            if let Err(err) =
+                Self::create_new_block(id, &mut bc, &mut tx_pool, private_key.clone()).await
+            {
                 error!("Error creating a new block: {}", err);
             }
         }
     }
 
-    pub fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
+    pub async fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
         match msg.data {
             DecodedMessageData::Tx(tx) => {
-                if let Err(err) = self.process_transaction(&msg.from, tx) {
+                if let Err(err) = self.process_transaction(&msg.from, tx).await {
                     error!("Error processing transaction: {err}");
                 };
             }
@@ -180,12 +188,17 @@ impl Server {
         Ok(())
     }
 
-    pub fn process_transaction(&mut self, net_addr: &NetAddr, mut tx: Transaction) -> Result<()> {
+    pub async fn process_transaction(
+        &mut self,
+        net_addr: &NetAddr,
+        mut tx: Transaction,
+    ) -> Result<()> {
         tx.verify()?;
 
         let hash = tx.hash(Box::new(TxHasher))?;
+        let mut mem_pool = self.mem_pool.lock().await;
 
-        if self.mem_pool.has(&hash) {
+        if mem_pool.has(&hash) {
             info!("mem_pool already contains tx {}", hash);
         }
 
@@ -194,7 +207,7 @@ impl Server {
         info!(
             "Adding new tx {} to mem_pool (len: {})",
             hash,
-            self.mem_pool.len()
+            mem_pool.len()
         );
 
         // TODO: broadcast this tx to peers
@@ -208,17 +221,38 @@ impl Server {
             }
         });
 
-        self.mem_pool.add(tx)?;
+        mem_pool.add(tx)?;
 
         Ok(())
     }
 
-    pub async fn create_new_block(bc: &mut Blockchain, private_key: PrivateKey) -> Result<()> {
+    pub async fn create_new_block(
+        id: &str,
+        bc: &mut Blockchain,
+        tx_pool: &mut TxPool,
+        private_key: PrivateKey,
+    ) -> Result<()> {
         let prev_header = bc.get_header(bc.height().await).await?;
-        let mut block = Block::from_prev_header(prev_header, vec![])?;
+
+        // For now we're going to use all transactions that are in the mempool
+        // Later on when we know the internal structure of our transaction
+        // we will implement some kind of complexity function
+        // to determine how many transactions can be inculded in a block
+        let txx = tx_pool.transactions();
+
+        let mut block = Block::from_prev_header(prev_header, txx)?;
         info!("Creating new block with height {}", block.header.height);
         block.sign(&private_key)?;
+
+        info!(
+            "ID={id} Adding block {} with height {} to and transaction len {} to blockchain",
+            block.hash(Box::new(BlockHasher)),
+            block.header.height,
+            block.transactions.len(),
+        );
         bc.add_block(&mut block).await?;
+
+        tx_pool.flush();
 
         Ok(())
     }

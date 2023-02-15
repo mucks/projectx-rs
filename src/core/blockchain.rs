@@ -49,12 +49,6 @@ impl Blockchain {
     }
 
     async fn add_block_without_validation(&mut self, b: &mut Block) -> Result<()> {
-        info!(
-            "Adding block {} with height {} to blockchain",
-            b.hash(Box::new(BlockHasher)),
-            b.header.height
-        );
-
         self.headers.write().await.push(b.header);
         Ok(())
     }

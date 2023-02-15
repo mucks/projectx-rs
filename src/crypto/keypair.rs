@@ -33,7 +33,7 @@ impl PrivateKey {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct PublicKey {
     key: p256::PublicKey,
 }
@@ -59,7 +59,7 @@ impl Display for Signature {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Signature(p256::ecdsa::Signature);
 
 impl Signature {

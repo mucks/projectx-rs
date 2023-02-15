@@ -70,9 +70,10 @@ impl TxPool {
     pub fn flush(&mut self) {
         self.transactions = HashMap::new();
     }
-    pub fn transactions(&self) -> Vec<&Transaction> {
+    //TODO: fix cause very inefficient
+    pub fn transactions(&self) -> Vec<Transaction> {
         let s = TxMapSorter::new(&self.transactions);
-        s.transactions
+        s.transactions.into_iter().cloned().collect()
     }
 }
 
