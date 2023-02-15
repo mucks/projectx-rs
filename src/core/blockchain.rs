@@ -5,6 +5,7 @@ use super::{
     hasher::{BlockHasher, Hasher},
     storage::{MemoryStore, Storage},
     validator::{BlockValidator, Validator},
+    VM,
 };
 use anyhow::{anyhow, Result};
 use log::info;
@@ -46,6 +47,21 @@ impl Blockchain {
             .ok_or_else(|| anyhow!("blockchain has no validator"))?
             .validate_block(self, b)
             .await?;
+
+        // run vm code
+        for tx in &b.transactions {
+            info!(
+                "ID={} Running VM code hash={} len={}",
+                self.server_id,
+                tx.data.len(),
+                tx.hash()
+            );
+            let mut vm = VM::new(tx.data.clone());
+            vm.run()?;
+
+            info!("vm result: {:?}", vm.sp_stack_val());
+        }
+
         self.add_block_without_validation(b).await?;
         Ok(())
     }

@@ -63,7 +63,7 @@ impl TxPool {
 
     // Add a transaction to the pool, the caller is responsible for checking if the transaction already exists
     pub fn add(&mut self, mut tx: Transaction) -> Result<()> {
-        if tx.hash.is_none() {
+        if !tx.has_cached_hash() {
             tx.calculate_and_cache_hash(Box::new(TxHasher))?;
         }
 

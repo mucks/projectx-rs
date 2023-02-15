@@ -21,7 +21,7 @@ pub struct Transaction {
     pub signature: Option<Signature>,
     // cached version of tx hash
     #[serde(skip)]
-    pub hash: Option<Hash>,
+    hash: Option<Hash>,
     // first_seen is the time when the transaction was first seen locally
     #[serde(skip)]
     first_seen: u128,
@@ -52,6 +52,10 @@ impl Transaction {
             debug!("calculated hash for transaction: {}", self.hash.unwrap());
         }
         Ok(())
+    }
+
+    pub fn has_cached_hash(&self) -> bool {
+        self.hash.is_some()
     }
 
     pub fn hash(&self) -> Hash {

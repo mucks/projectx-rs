@@ -12,7 +12,7 @@ use super::{
     encoding::{Decoder, Encoder},
     hasher::Hasher,
     transaction::Transaction,
-    BincodeEncoder, BlockHasher,
+    BincodeEncoder, BlockHasher, TxHasher,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +31,7 @@ pub struct Block {
     validator: Option<PublicKey>,
     signature: Option<Signature>,
     // Cached version of the header hash
+    #[serde(skip)]
     hash: Hash,
 }
 
@@ -137,7 +138,8 @@ impl Block {
 
     pub fn random(height: u32, prev_block_hash: Hash) -> Result<Block> {
         let private_key = PrivateKey::generate();
-        let tx = Transaction::random_with_signature();
+        let mut tx = Transaction::random_with_signature();
+        tx.calculate_and_cache_hash(Box::new(TxHasher))?;
 
         let header = Header {
             version: 1,

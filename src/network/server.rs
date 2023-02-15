@@ -6,10 +6,9 @@ use std::{
 };
 
 use crate::{
-    core::{BincodeEncoder, Block, BlockHasher, Blockchain, Transaction, TxHasher},
+    core::{BincodeEncoder, Block, Blockchain, Transaction, TxHasher},
     crypto::PrivateKey,
-    network::DecodedMessageData,
-    types::Hash,
+    network::{server, DecodedMessageData},
 };
 use tokio::{
     sync::{mpsc, Mutex},
@@ -95,7 +94,10 @@ impl Server {
                 if let Some(rpc_decode_fn) = self.opts.rpc_decode_fn.as_mut() {
                     match rpc_decode_fn(rpc) {
                         Ok(msg) => {
-                            debug!("RPC Message incoming from: {} ", msg.from);
+                            debug!(
+                                "ID={} RPC Message incoming from: {} ",
+                                &self.opts.id, msg.from
+                            );
                             if let Err(err) = self.process_message(msg).await {
                                 error!("error processing message: {}", err);
                             };
@@ -188,6 +190,14 @@ impl Server {
     }
 
     pub async fn process_block(&mut self, mut block: Block) -> Result<()> {
+        {
+            for tx in &mut block.transactions {
+                if !tx.has_cached_hash() {
+                    tx.calculate_and_cache_hash(Box::new(TxHasher))?;
+                }
+            }
+        }
+
         {
             self.chain.lock().await.add_block(&mut block).await?;
         }
