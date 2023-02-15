@@ -38,12 +38,19 @@ impl Validator for BlockValidator {
         let header = bc.get_header(b.header.height - 1).await?;
         let hash = BlockHasher {}.hash(&header)?;
 
-        if hash != b.header.prev_block_hash {
-            return Err(anyhow!(
-                "the hash of the previous block {} is invalid!",
-                b.header.prev_block_hash
-            ));
-        }
+        match b.header.prev_block_hash {
+            Some(prev_block_hash) => {
+                if hash != prev_block_hash {
+                    return Err(anyhow!(
+                        "the hash of the previous block {} is invalid!",
+                        prev_block_hash
+                    ));
+                }
+            }
+            None => {
+                return Err(anyhow!("the hash of the previous block is not set!",));
+            }
+        };
 
         b.verify()?;
 

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -44,14 +45,15 @@ impl Transaction {
         self.first_seen
     }
 
-    pub fn hash(&mut self, hasher: Box<dyn Hasher<Transaction>>) -> Result<Hash> {
-        match self.hash {
-            Some(h) => Ok(h),
-            None => {
-                self.hash = Some(hasher.hash(&self)?);
-                Ok(self.hash.unwrap())
-            }
+    pub fn calculate_and_cache_hash(&mut self, hasher: Box<dyn Hasher<Transaction>>) -> Result<()> {
+        if self.hash.is_none() {
+            self.hash = Some(hasher.hash(self)?);
         }
+        Ok(())
+    }
+
+    pub fn hash(&self) -> Hash {
+        self.hash.expect("transaction hash not calculated")
     }
 
     pub fn sign(&mut self, private_key: &PrivateKey) {
@@ -90,7 +92,7 @@ impl Transaction {
         let private_key = PrivateKey::generate();
 
         let mut tx = Transaction {
-            data: b"foo".to_vec(),
+            data: thread_rng().gen::<[u8; 32]>().to_vec(),
             from: None,
             signature: None,
             hash: None,

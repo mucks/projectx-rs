@@ -37,42 +37,80 @@ impl<'a> TxMapSorter<'a> {
 }
 
 pub struct TxPool {
-    transactions: HashMap<Hash, Transaction>,
+    all: HashMap<Hash, Transaction>,
+    pending: HashMap<Hash, Transaction>,
+    max_length: usize,
 }
 
 impl TxPool {
-    pub fn new() -> Self {
+    pub fn new(max_length: usize) -> Self {
         Self {
-            transactions: HashMap::new(),
+            all: HashMap::new(),
+            pending: HashMap::new(),
+            max_length,
         }
     }
     pub fn len(&self) -> usize {
-        self.transactions.len()
+        self.all.len()
+    }
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.pending.clear()
     }
 
     // Add a transaction to the pool, the caller is responsible for checking if the transaction already exists
     pub fn add(&mut self, mut tx: Transaction) -> Result<()> {
-        let hash = tx.hash(Box::new(TxHasher {}))?;
+        if tx.hash.is_none() {
+            tx.calculate_and_cache_hash(Box::new(TxHasher))?;
+        }
 
-        if let Some(tx_mut) = self.transactions.get_mut(&hash) {
-            *tx_mut = tx;
-        } else {
-            self.transactions.insert(hash, tx);
+        if self.all.len() == self.max_length {
+            let oldest_hash = self
+                .all()
+                .first()
+                .ok_or_else(|| anyhow!("could not find first block in all transactions"))?
+                .hash();
+            self.all.remove(&oldest_hash);
+        }
+
+        let tx_hash = tx.hash();
+
+        if !self.has(&tx_hash) {
+            self.all.insert(tx_hash, tx.clone());
+            self.pending.insert(tx_hash, tx);
         }
 
         Ok(())
     }
 
     pub fn has(&self, hash: &Hash) -> bool {
-        self.transactions.contains_key(hash)
+        self.all.contains_key(hash)
     }
 
     pub fn flush(&mut self) {
-        self.transactions = HashMap::new();
+        self.all = HashMap::new();
     }
+    pub fn pending(&self) -> Vec<&Transaction> {
+        let s = TxMapSorter::new(&self.pending);
+        s.transactions
+    }
+
+    pub fn all(&self) -> Vec<&Transaction> {
+        let s = TxMapSorter::new(&self.all);
+        s.transactions
+    }
+
+    pub fn pending_cloned(&self) -> Vec<Transaction> {
+        let s = TxMapSorter::new(&self.pending);
+        s.transactions.into_iter().cloned().collect()
+    }
+
     //TODO: fix cause very inefficient
-    pub fn transactions(&self) -> Vec<Transaction> {
-        let s = TxMapSorter::new(&self.transactions);
+    pub fn all_cloned(&self) -> Vec<Transaction> {
+        let s = TxMapSorter::new(&self.all);
         s.transactions.into_iter().cloned().collect()
     }
 }
@@ -85,30 +123,33 @@ mod tests {
 
     #[test]
     fn test_tx_pool() {
-        let p = TxPool::new();
+        let p = TxPool::new(10);
         assert_eq!(p.len(), 0);
     }
 
     #[test]
     fn test_tx_pool_add_tx() -> Result<()> {
-        let mut p = TxPool::new();
-        let mut tx = Transaction::new(b"foo".to_vec());
-        p.add(tx)?;
-        assert_eq!(p.len(), 1);
-        let mut tx = Transaction::new(b"foo".to_vec());
-        p.add(tx)?;
-        assert_eq!(p.len(), 1);
+        let mut p = TxPool::new(11);
+        let n = 10;
 
-        p.flush();
-        assert_eq!(p.len(), 0);
+        for i in 1..n {
+            let tx = Transaction::random_with_signature();
+
+            p.add(tx.clone())?;
+            p.add(tx)?;
+
+            assert_eq!(i, p.pending_count());
+            assert_eq!(i, p.pending.len());
+            assert_eq!(i, p.all.len());
+        }
 
         Ok(())
     }
 
     #[test]
     fn test_sort_transaction() -> Result<()> {
-        let mut p = TxPool::new();
         let tx_len: usize = 1000;
+        let mut p = TxPool::new(tx_len);
 
         for i in 0..tx_len {
             let mut tx = Transaction::new(i.to_le_bytes().to_vec());
@@ -117,7 +158,7 @@ mod tests {
         }
         assert_eq!(tx_len, p.len());
 
-        let transactions = p.transactions();
+        let transactions = p.all();
         for i in 0..tx_len - 1 {
             assert!(transactions[i].first_seen() <= transactions[i + 1].first_seen());
         }

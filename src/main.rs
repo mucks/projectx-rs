@@ -29,18 +29,24 @@ async fn main() -> anyhow::Result<()> {
     tr_remote_a.connect(tr_remote_b.clone()).await?;
     tr_remote_b.connect(tr_remote_c.clone()).await?;
 
+    tr_remote_a.connect(tr_local.clone()).await?;
+
+    let tr_local_clone = tr_local.clone();
+    let tr_remote_a_clone = tr_remote_a.clone();
+
+    tokio::task::spawn(async move {
+        loop {
+            if let Err(err) =
+                send_transaction(tr_remote_a_clone.clone(), tr_local_clone.addr()).await
+            {
+                println!("Error: {err}");
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+    });
+
     init_remote_servers(vec![tr_remote_a, tr_remote_b, tr_remote_c]).await?;
-
-    // tokio::task::spawn(async move {
-    //     loop {
-    //         if let Err(err) = send_transaction(tr_remote_clone.clone(), tr_local_clone.addr()).await
-    //         {
-    //             println!("Error: {err}");
-    //         }
-
-    //         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    //     }
-    // });
 
     let private_key = PrivateKey::generate();
     let mut local_server = make_server("LOCAL".into(), tr_local, Some(private_key)).await?;
@@ -52,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
 async fn init_remote_servers(trs: Vec<Box<dyn Transport>>) -> Result<()> {
     for (i, tr) in trs.into_iter().enumerate() {
         tokio::task::spawn(async move {
-            let id = format!("ID{i}");
+            let id = format!("REMOTE_{i}");
             let mut s = make_server(id, tr, None).await.unwrap();
             s.start().await;
         });

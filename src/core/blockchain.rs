@@ -16,14 +16,16 @@ pub struct Blockchain {
     store: Box<dyn Storage>,
     headers: RwLock<Vec<Header>>,
     validator: Option<Box<dyn Validator>>,
+    server_id: String,
 }
 
 impl Blockchain {
-    pub async fn new(mut genesis: Block) -> Result<Self> {
+    pub async fn new(server_id: String, mut genesis: Block) -> Result<Self> {
         let mut bc = Blockchain {
             store: Box::new(MemoryStore::new()),
             validator: Some(Box::new(BlockValidator::new())),
             headers: RwLock::new(vec![]),
+            server_id,
         };
 
         bc.add_block_without_validation(&mut genesis).await?;
@@ -49,6 +51,13 @@ impl Blockchain {
     }
 
     async fn add_block_without_validation(&mut self, b: &mut Block) -> Result<()> {
+        info!(
+            "ID={} Adding block {} with height {} to and transaction len {} to blockchain",
+            self.server_id,
+            b.hash(Box::new(BlockHasher)),
+            b.header.height,
+            b.transactions.len(),
+        );
         self.headers.write().await.push(b.header);
         Ok(())
     }
@@ -85,7 +94,7 @@ mod tests {
     use anyhow::Result;
 
     async fn blockchain() -> Result<Blockchain> {
-        Blockchain::new(Block::random(0, Hash::default())?).await
+        Blockchain::new("".into(), Block::random(0, Hash::default())?).await
     }
 
     #[tokio::test]

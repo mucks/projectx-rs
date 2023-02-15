@@ -19,7 +19,7 @@ use super::{
 pub struct Header {
     version: u32,
     data_hash: Hash,
-    pub prev_block_hash: Hash,
+    pub prev_block_hash: Option<Hash>,
     timestamp: u128,
     pub height: u32,
 }
@@ -57,7 +57,7 @@ impl Block {
         let header = Header {
             version: ph.version,
             data_hash,
-            prev_block_hash: BlockHasher {}.hash(&ph)?,
+            prev_block_hash: Some(BlockHasher {}.hash(&ph)?),
             timestamp: Instant::now().elapsed().as_nanos(),
             height: ph.height + 1,
         };
@@ -115,20 +115,20 @@ impl Block {
         self.transactions.push(tx);
     }
 
-    pub fn encode(&mut self, mut enc: Box<dyn Encoder<Self>>) -> Result<()> {
+    pub fn encode(&self, enc: &mut dyn Encoder<Self>) -> Result<()> {
         enc.encode(self)
     }
 
-    pub fn decode(&mut self, mut dec: Box<dyn Decoder<Self>>) -> Result<()> {
+    pub fn decode(&mut self, dec: &mut dyn Decoder<Self>) -> Result<()> {
         dec.decode(self)
     }
 
     pub fn genesis() -> Block {
         let header = Header {
             version: 1,
-            data_hash: Hash::random(),
-            prev_block_hash: Hash::default(),
-            timestamp: std::time::Instant::now().elapsed().as_nanos(),
+            data_hash: Hash::default(),
+            prev_block_hash: None,
+            timestamp: 0,
             height: 0,
         };
 
@@ -142,7 +142,7 @@ impl Block {
         let header = Header {
             version: 1,
             data_hash: Hash::random(),
-            prev_block_hash,
+            prev_block_hash: Some(prev_block_hash),
             timestamp: std::time::Instant::now().elapsed().as_nanos(),
             height,
         };
