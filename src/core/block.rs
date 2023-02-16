@@ -138,7 +138,7 @@ impl Block {
 
     pub fn random(height: u32, prev_block_hash: Hash) -> Result<Block> {
         let private_key = PrivateKey::generate();
-        let mut tx = Transaction::random_with_signature();
+        let mut tx = Transaction::new(vec![0x03, 0x0a, 0x02, 0x0a, 0x0e]);
         tx.calculate_and_cache_hash(Box::new(TxHasher))?;
 
         let header = Header {
@@ -149,7 +149,7 @@ impl Block {
             height,
         };
 
-        let mut b = Block::new(header, vec![tx]);
+        let mut b = Block::new(header, vec![]);
         let data_hash = calculate_data_hash(&b.transactions)?;
         b.header.data_hash = data_hash;
         b.sign(&private_key)?;

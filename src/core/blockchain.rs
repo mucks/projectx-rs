@@ -5,7 +5,7 @@ use super::{
     hasher::{BlockHasher, Hasher},
     storage::{MemoryStore, Storage},
     validator::{BlockValidator, Validator},
-    VM,
+    State, VM,
 };
 use anyhow::{anyhow, Result};
 use log::info;
@@ -18,6 +18,8 @@ pub struct Blockchain {
     headers: RwLock<Vec<Header>>,
     validator: Option<Box<dyn Validator>>,
     server_id: String,
+    // TODO: make this an interface
+    contract_state: State,
 }
 
 impl Blockchain {
@@ -27,6 +29,7 @@ impl Blockchain {
             validator: Some(Box::new(BlockValidator::new())),
             headers: RwLock::new(vec![]),
             server_id,
+            contract_state: State::new(),
         };
 
         bc.add_block_without_validation(&mut genesis).await?;
@@ -56,10 +59,10 @@ impl Blockchain {
                 tx.data.len(),
                 tx.hash()
             );
-            let mut vm = VM::new(tx.data.clone());
+            let mut vm = VM::new(tx.data.clone(), &mut self.contract_state);
             vm.run()?;
 
-            info!("vm result: {:?}", vm.sp_stack_val());
+            info!("vm result: {:?}", self.contract_state);
         }
 
         self.add_block_without_validation(b).await?;

@@ -84,7 +84,9 @@ async fn make_server(
 
 async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
     let priv_key = PrivateKey::generate();
-    let data = vec![0x01, 0x0a, 0x02, 0x0a, 0x0b];
+    let data = vec![
+        0x03, 0x0a, 0x46, 0x0c, 0x4f, 0x0c, 0x4f, 0x0c, 0x0d, 0x05, 0x0a, 0x0f,
+    ];
     let mut tx = Transaction::new(data.to_vec());
     tx.sign(&priv_key);
     let mut buf: Vec<u8> = Vec::new();
