@@ -84,10 +84,8 @@ async fn make_server(
 
 async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
     let priv_key = PrivateKey::generate();
-    let data = vec![
-        0x03, 0x0a, 0x46, 0x0c, 0x4f, 0x0c, 0x4f, 0x0c, 0x0d, 0x05, 0x0a, 0x0f,
-    ];
-    let mut tx = Transaction::new(data.to_vec());
+    let contract = contract();
+    let mut tx = Transaction::new(contract);
     tx.sign(&priv_key);
     let mut buf: Vec<u8> = Vec::new();
     tx.encode(&mut BincodeEncoder::new(&mut buf))?;
@@ -96,4 +94,13 @@ async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
 
     tr.send_message(&to, msg.bytes()?).await?;
     Ok(())
+}
+
+fn contract() -> Vec<u8> {
+    let mut data = vec![
+        0x02, 0x0a, 0x03, 0x0a, 0x0b, 0x4f, 0x0c, 0x4f, 0x0c, 0x46, 0x0c, 0x03, 0x0a, 0x0d, 0x0f,
+    ];
+    let push_foo = vec![0x4f, 0x0c, 0x4f, 0x0c, 0x46, 0x0c, 0x03, 0x0a, 0x0d, 0x0ae];
+    data.extend(push_foo);
+    data
 }

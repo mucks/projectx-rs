@@ -62,7 +62,9 @@ impl Blockchain {
             let mut vm = VM::new(tx.data.clone(), &mut self.contract_state);
             vm.run()?;
 
-            info!("vm result: {:?}", self.contract_state);
+            let result = vm.stack.pop();
+            info!("VM RESULT: {:?}", result);
+            info!("VM STATE: {:?}", self.contract_state);
         }
 
         self.add_block_without_validation(b).await?;
