@@ -5,19 +5,20 @@ It is a simple in-memory transport that does not actually send messages over the
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 
 use super::{
-    server::{new_channel, Channel},
+    new_channel,
     transport::{NetAddr, Transport},
-    RPC,
+    Channel, RPC,
 };
 
 #[derive(Debug, Clone)]
 pub struct LocalTransport {
     addr: NetAddr,
     consume_channel: Channel<RPC>,
-    peers: HashMap<NetAddr, Box<dyn Transport>>,
+    peers: Arc<RwLock<HashMap<NetAddr, Box<dyn Transport>>>>,
 }
 
 impl LocalTransport {
@@ -25,7 +26,7 @@ impl LocalTransport {
         Self {
             addr,
             consume_channel: new_channel(1024),
-            peers: HashMap::new(),
+            peers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -41,13 +42,17 @@ impl Transport for LocalTransport {
     }
 
     async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()> {
-        self.peers.insert(tr.addr(), tr);
+        self.peers.write().await.insert(tr.addr(), tr);
         Ok(())
     }
 
     async fn send_message(&self, to: &NetAddr, payload: Vec<u8>) -> Result<()> {
+        if &self.addr == to {
+            return Ok(());
+        }
+        let peers = self.peers().await;
         let peer =
-            self.peers
+            peers
                 .get(to)
                 .ok_or(anyhow!("{} could not send message to {}", self.addr, to))?;
 
@@ -63,14 +68,18 @@ impl Transport for LocalTransport {
     }
 
     async fn broadcast(&self, payload: Vec<u8>) -> Result<()> {
-        for peer in &self.peers {
-            self.send_message(peer.0, payload.clone()).await?;
+        for peer in self.peers.read().await.iter() {
+            self.send_message(&peer.0, payload.clone()).await?;
         }
         Ok(())
     }
 
     fn addr(&self) -> NetAddr {
         self.addr.clone()
+    }
+
+    async fn peers(&self) -> HashMap<NetAddr, Box<dyn Transport>> {
+        self.peers.read().await.clone()
     }
 }
 
@@ -86,8 +95,8 @@ mod tests {
         tr_a.connect(Box::new(tr_b.clone())).await?;
         tr_b.connect(Box::new(tr_a.clone())).await?;
 
-        assert_eq!(tr_a.peers[&tr_b.addr()].addr(), tr_b.addr());
-        assert_eq!(tr_b.peers[&tr_a.addr()].addr(), tr_a.addr());
+        assert_eq!(tr_a.peers().await[&tr_b.addr()].addr(), tr_b.addr());
+        assert_eq!(tr_b.peers().await[&tr_a.addr()].addr(), tr_a.addr());
 
         Ok(())
     }

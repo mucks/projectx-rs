@@ -10,35 +10,24 @@ use crate::{
     crypto::PrivateKey,
     network::DecodedMessageData,
 };
-use tokio::{
-    sync::{mpsc, Mutex},
-    time,
-};
+use tokio::{sync::Mutex, time};
 
 use super::{
     default_rpc_decode_fn,
     message::{GetStatusMessage, StatusMessage},
-    transport::{NetAddr, Transport},
+    new_channel,
+    transport::NetAddr,
     tx_pool::TxPool,
-    DecodedMessage, Message, MessageType, RPCDecodeFn, RPC,
+    BTransport, Channel, DecodedMessage, GetBlocksMessage, Message, MessageType, RPCDecodeFn, RPC,
 };
-
-// Sender can be passed within threads safely and cloned as many times as needed.
-// Receiver needs to be wrapped in a Mutex to be shared across threads and can only be accessed once at a time.
-pub type Channel<T> = (mpsc::Sender<T>, Arc<Mutex<mpsc::Receiver<T>>>);
-
-pub fn new_channel<T>(buffer_size: usize) -> Channel<T> {
-    let (tx, rx) = mpsc::channel(buffer_size);
-    (tx, Arc::new(Mutex::new(rx)))
-}
 
 pub struct ServerOpts {
     pub rpc_decode_fn: Option<RPCDecodeFn>,
-    pub transports: Vec<Box<dyn Transport>>,
+    pub transports: Vec<BTransport>,
     pub private_key: Option<PrivateKey>,
     pub block_time: Option<Duration>,
     pub id: String,
-    pub transport: Box<dyn Transport>,
+    pub transport: BTransport,
 }
 
 pub struct Server {
@@ -73,9 +62,24 @@ impl Server {
         })
     }
 
+    pub async fn get_status_from_transports(&mut self) -> Result<()> {
+        for tr in &mut self.opts.transports {
+            let tr_addr = tr.addr();
+            if tr_addr != self.opts.transport.addr() {
+                if let Err(err) =
+                    Self::send_get_status_message(&self.opts.transport, &tr_addr).await
+                {
+                    error!("Send get_status_message error: {:?}", err);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn start(&mut self) -> Result<()> {
-        println!("{:?}", self.opts.transports);
+        // println!("{:?}", self.opts.transports);
         self.init_transports();
+        self.get_status_from_transports().await?;
 
         if self.is_validator {
             let block_time = self.opts.block_time.unwrap();
@@ -87,13 +91,6 @@ impl Server {
                 Self::validator_loop(bc, tx_pool, private_key, block_time, transports).await;
             });
         }
-
-        // for tr in &mut self.opts.transports {
-        //     if let Err(err) = Self::send_get_status_message(tr).await {
-        //         error!("Send get_status_message error: {:?}", err);
-        //     }
-        //     // tr.send_message(to, payload);
-        // }
 
         loop {
             // Waits for an RPC message to arrive and then proccesses it with the dynamic function that's passed
@@ -109,7 +106,9 @@ impl Server {
                                 &self.opts.id, msg.from
                             );
                             if let Err(err) = self.process_message(msg).await {
-                                error!("ID={} error processing message: {}", self.opts.id, err);
+                                if err.to_string() != "block already known" {
+                                    error!("ID={} error processing message: {}", self.opts.id, err);
+                                }
                             };
                         }
                         Err(err) => error!("RPC Decoding Error: {err}"),
@@ -129,7 +128,7 @@ impl Server {
         tx_pool: Arc<Mutex<TxPool>>,
         private_key: PrivateKey,
         block_time: Duration,
-        transports: Vec<Box<dyn Transport>>,
+        transports: Vec<BTransport>,
     ) {
         let mut ticker = time::interval(block_time);
 
@@ -156,7 +155,20 @@ impl Server {
         }
     }
 
-    pub async fn broadcast_block(transports: &[Box<dyn Transport>], b: &Block) -> Result<()> {
+    // Send and Broadcast functions
+
+    async fn send_get_status_message(tr: &BTransport, to: &NetAddr) -> Result<()> {
+        let status_msg = GetStatusMessage {};
+        let mut buf = vec![];
+        BincodeEncoder::new(&mut buf).encode(&status_msg)?;
+
+        let msg = Message::new(MessageType::GetStatus, buf);
+        tr.send_message(to, msg.bytes()?).await?;
+
+        Ok(())
+    }
+
+    pub async fn broadcast_block(transports: &Vec<BTransport>, b: &Block) -> Result<()> {
         let mut buf: Vec<u8> = Vec::new();
         b.encode(&mut BincodeEncoder::new(&mut buf))?;
 
@@ -167,14 +179,14 @@ impl Server {
         Ok(())
     }
 
-    pub async fn broadcast(transports: &[Box<dyn Transport>], payload: Vec<u8>) -> Result<()> {
+    pub async fn broadcast(transports: &Vec<BTransport>, payload: Vec<u8>) -> Result<()> {
         for tr in transports {
             tr.broadcast(payload.clone()).await?;
         }
         Ok(())
     }
 
-    pub async fn broadcast_tx(transports: &[Box<dyn Transport>], tx: &Transaction) -> Result<()> {
+    pub async fn broadcast_tx(transports: &Vec<BTransport>, tx: &Transaction) -> Result<()> {
         let mut buf: Vec<u8> = Vec::new();
         tx.encode(&mut BincodeEncoder::new(&mut buf))?;
 
@@ -183,6 +195,8 @@ impl Server {
         //let buf: Vec<u8> = Vec::new();
         Ok(())
     }
+
+    // Process functions
 
     pub async fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
         match msg.data {
@@ -194,16 +208,19 @@ impl Server {
             DecodedMessageData::GetStatusMessage => {
                 self.process_get_status_message(&msg.from).await
             }
+            DecodedMessageData::GetBlocksMessage(get_block_message) => {
+                self.process_get_blocks_message(&msg.from, &get_block_message)
+                    .await
+            }
         }
     }
 
-    pub async fn send_get_status_message(tr: &mut Box<dyn Transport>) -> Result<()> {
-        let status_msg = GetStatusMessage {};
-        let mut buf = vec![];
-        BincodeEncoder::new(&mut buf).encode(&status_msg)?;
-
-        let msg = Message::new(MessageType::GetStatus, buf);
-        // tr.send_message(&to, msg.bytes()?).await?;
+    async fn process_get_blocks_message(
+        &mut self,
+        from: &NetAddr,
+        data: &GetBlocksMessage,
+    ) -> Result<()> {
+        println!("got get blocks message => {}", data.to);
 
         Ok(())
     }
@@ -213,12 +230,25 @@ impl Server {
         from: &NetAddr,
         msg: StatusMessage,
     ) -> Result<()> {
-        info!(
-            "Received GetStatus Response message from {} => {:?}",
-            from, msg
-        );
+        let our_height = self.chain.lock().await.height().await;
+        if msg.current_height <= our_height {
+            info!(
+                "cannot sync block_height too low our height: {}, their height: {}, addr: {}",
+                our_height, msg.current_height, from
+            );
+            return Ok(());
+        }
+        // In this case we are behind and need to sync
+        let get_blocks_msg = GetBlocksMessage {
+            from: our_height + 1,
+            to: msg.current_height,
+        };
 
-        Ok(())
+        let mut buf = vec![];
+        BincodeEncoder::new(&mut buf).encode(&get_blocks_msg)?;
+
+        let msg = Message::new(MessageType::GetBlocks, buf);
+        self.opts.transport.send_message(from, msg.bytes()?).await
     }
 
     pub async fn process_get_status_message(&mut self, from: &NetAddr) -> Result<()> {
@@ -245,7 +275,7 @@ impl Server {
                 }
             }
         }
-        info!("Received block: {}", block.hash(Box::new(BlockHasher)));
+        // info!("Received block: {}", block.hash(Box::new(BlockHasher)));
 
         {
             self.chain.lock().await.add_block(&mut block).await?;
@@ -307,7 +337,7 @@ impl Server {
         bc: &mut Blockchain,
         tx_pool: &mut TxPool,
         private_key: PrivateKey,
-        transports: Vec<Box<dyn Transport>>,
+        transports: Vec<BTransport>,
     ) -> Result<()> {
         let prev_header = bc.get_header(bc.height().await).await?;
 

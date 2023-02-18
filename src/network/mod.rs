@@ -10,5 +10,4 @@ pub use message::*;
 pub use rpc::*;
 pub use server::Server;
 pub use server::ServerOpts;
-pub use transport::NetAddr;
-pub use transport::Transport;
+pub use transport::*;

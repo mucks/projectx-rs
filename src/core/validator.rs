@@ -24,11 +24,12 @@ impl BlockValidator {
 impl Validator for BlockValidator {
     async fn validate_block(&self, bc: &Blockchain, b: &mut Block) -> Result<()> {
         if bc.has_block(b.header.height).await {
-            return Err(anyhow!(
-                "chain already contains block {} with hash {}",
-                b.header.height.clone(),
-                b.hash(Box::new(BlockHasher))
-            ));
+            return Err(anyhow!("block already known"));
+            // return Err(anyhow!(
+            //     "chain already contains block {} with hash {}",
+            //     b.header.height.clone(),
+            //     b.hash(Box::new(BlockHasher))
+            // ));
         }
 
         if b.header.height != bc.height().await + 1 {

@@ -1,6 +1,6 @@
 // currently not using these traits because i couldn't get it to work with mutable references
 
-use super::transport::NetAddr;
+use super::{transport::NetAddr, GetBlocksMessage};
 use crate::{
     core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Header, Transaction},
     network::message::StatusMessage,
@@ -30,6 +30,7 @@ pub enum DecodedMessageData {
     Block(Block),
     StatusMessage(StatusMessage),
     GetStatusMessage,
+    GetBlocksMessage(GetBlocksMessage),
 }
 
 pub struct DecodedMessage {
