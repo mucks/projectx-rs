@@ -1,18 +1,22 @@
 // currently not using these traits because i couldn't get it to work with mutable references
 
-use std::{io::Cursor, sync::Arc};
-
-use crate::core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Header, Transaction};
-
 use super::transport::NetAddr;
+use crate::{
+    core::{BincodeDecoder, BincodeEncoder, Block, Decoder, Encoder, Header, Transaction},
+    network::message::StatusMessage,
+};
 use anyhow::{anyhow, Result};
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::io::Cursor;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub enum MessageType {
-    Tx,
-    Block,
+    Tx = 0x01,
+    Block = 0x02,
+    GetBlocks = 0x03,
+    Status = 0x04,
+    GetStatus = 0x05,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +28,8 @@ pub struct RPC {
 pub enum DecodedMessageData {
     Tx(Transaction),
     Block(Block),
+    StatusMessage(StatusMessage),
+    GetStatusMessage,
 }
 
 pub struct DecodedMessage {
@@ -69,6 +75,20 @@ pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
             Ok(DecodedMessage {
                 from: rpc.from.clone(),
                 data: DecodedMessageData::Block(block),
+            })
+        }
+        MessageType::GetStatus => Ok(DecodedMessage {
+            from: rpc.from.clone(),
+            data: DecodedMessageData::GetStatusMessage,
+        }),
+        MessageType::Status => {
+            let mut message = StatusMessage::new("".into(), 0, 0);
+            let mut cursor = Cursor::new(&mut msg.data);
+            let mut dec = BincodeDecoder::new(&mut cursor);
+            dec.decode(&mut message)?;
+            Ok(DecodedMessage {
+                from: rpc.from.clone(),
+                data: DecodedMessageData::StatusMessage(message),
             })
         }
         // MessageType::Block => {}

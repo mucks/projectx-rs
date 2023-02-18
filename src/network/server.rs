@@ -6,9 +6,9 @@ use std::{
 };
 
 use crate::{
-    core::{BincodeEncoder, Block, Blockchain, Transaction, TxHasher},
+    core::{BincodeEncoder, Block, Blockchain, Encoder, Transaction, TxHasher},
     crypto::PrivateKey,
-    network::{server, DecodedMessageData},
+    network::DecodedMessageData,
 };
 use tokio::{
     sync::{mpsc, Mutex},
@@ -17,6 +17,7 @@ use tokio::{
 
 use super::{
     default_rpc_decode_fn,
+    message::{GetStatusMessage, StatusMessage},
     transport::{NetAddr, Transport},
     tx_pool::TxPool,
     DecodedMessage, Message, MessageType, RPCDecodeFn, RPC,
@@ -37,6 +38,7 @@ pub struct ServerOpts {
     pub private_key: Option<PrivateKey>,
     pub block_time: Option<Duration>,
     pub id: String,
+    pub transport: Box<dyn Transport>,
 }
 
 pub struct Server {
@@ -85,6 +87,13 @@ impl Server {
             });
         }
 
+        // for tr in &mut self.opts.transports {
+        //     if let Err(err) = Self::send_get_status_message(tr).await {
+        //         error!("Send get_status_message error: {:?}", err);
+        //     }
+        //     // tr.send_message(to, payload);
+        // }
+
         loop {
             // Waits for an RPC message to arrive and then proccesses it with the dynamic function that's passed
             let opt_rpc =
@@ -99,7 +108,7 @@ impl Server {
                                 &self.opts.id, msg.from
                             );
                             if let Err(err) = self.process_message(msg).await {
-                                error!("error processing message: {}", err);
+                                error!("ID={} error processing message: {}", self.opts.id, err);
                             };
                         }
                         Err(err) => error!("RPC Decoding Error: {err}"),
@@ -145,22 +154,6 @@ impl Server {
         }
     }
 
-    pub async fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
-        match msg.data {
-            DecodedMessageData::Tx(tx) => {
-                if let Err(err) = self.process_transaction(&msg.from, tx).await {
-                    error!("ID={} Error processing transaction: {err}", self.opts.id);
-                };
-            }
-            DecodedMessageData::Block(block) => {
-                if let Err(err) = self.process_block(block).await {
-                    error!("ID={} Error processing block: {err}", self.opts.id)
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub async fn broadcast_block(transports: &[Box<dyn Transport>], b: &Block) -> Result<()> {
         let mut buf: Vec<u8> = Vec::new();
         b.encode(&mut BincodeEncoder::new(&mut buf))?;
@@ -186,6 +179,59 @@ impl Server {
         let msg = Message::new(MessageType::Tx, buf);
         Self::broadcast(transports, msg.bytes()?).await?;
         //let buf: Vec<u8> = Vec::new();
+        Ok(())
+    }
+
+    pub async fn process_message(&mut self, msg: DecodedMessage) -> Result<()> {
+        match msg.data {
+            DecodedMessageData::Tx(tx) => self.process_transaction(&msg.from, tx).await,
+            DecodedMessageData::Block(block) => self.process_block(block).await,
+            DecodedMessageData::StatusMessage(message) => {
+                self.process_status_message(&msg.from, message).await
+            }
+            DecodedMessageData::GetStatusMessage => {
+                self.process_get_status_message(&msg.from).await
+            }
+        }
+    }
+
+    pub async fn send_get_status_message(tr: &mut Box<dyn Transport>) -> Result<()> {
+        let status_msg = GetStatusMessage {};
+        let mut buf = vec![];
+        BincodeEncoder::new(&mut buf).encode(&status_msg)?;
+
+        let msg = Message::new(MessageType::GetStatus, buf);
+        // tr.send_message(&to, msg.bytes()?).await?;
+
+        Ok(())
+    }
+
+    pub async fn process_status_message(
+        &mut self,
+        from: &NetAddr,
+        msg: StatusMessage,
+    ) -> Result<()> {
+        info!(
+            "Received GetStatus Response message from {} => {:?}",
+            from, msg
+        );
+
+        Ok(())
+    }
+
+    pub async fn process_get_status_message(&mut self, from: &NetAddr) -> Result<()> {
+        info!("Received get_status_message from {}", from);
+        let height = self.chain.lock().await.height().await;
+
+        //TODO: get version from somewhere
+        let status_msg = StatusMessage::new(self.opts.id.clone(), 0, height);
+
+        let mut buf = vec![];
+        BincodeEncoder::new(&mut buf).encode(&status_msg)?;
+
+        let msg = Message::new(MessageType::Status, buf);
+        self.opts.transport.send_message(from, msg.bytes()?).await?;
+
         Ok(())
     }
 

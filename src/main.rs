@@ -4,12 +4,11 @@
 // Tx
 // Keypair
 
-use crate::core::{BincodeEncoder, Transaction};
+use crate::core::{BincodeEncoder, Encoder, Transaction};
 
 use anyhow::Result;
 use crypto::PrivateKey;
-use network::{Message, NetAddr, Server, Transport};
-use rand::{thread_rng, Rng};
+use network::{GetStatusMessage, Message, MessageType, NetAddr, Server, Transport};
 
 mod core;
 mod crypto;
@@ -28,11 +27,14 @@ async fn main() -> anyhow::Result<()> {
     tr_local.connect(tr_remote_a.clone()).await?;
     tr_remote_a.connect(tr_remote_b.clone()).await?;
     tr_remote_b.connect(tr_remote_c.clone()).await?;
+    tr_remote_b.connect(tr_remote_a.clone()).await?;
 
     tr_remote_a.connect(tr_local.clone()).await?;
 
     let tr_local_clone = tr_local.clone();
     let tr_remote_a_clone = tr_remote_a.clone();
+
+    init_remote_servers(vec![tr_remote_a.clone(), tr_remote_b, tr_remote_c]).await?;
 
     tokio::task::spawn(async move {
         loop {
@@ -46,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    init_remote_servers(vec![tr_remote_a, tr_remote_b, tr_remote_c]).await?;
+    send_get_status_message(tr_remote_a, "REMOTE_B".to_string()).await?;
 
     let private_key = PrivateKey::generate();
     let mut local_server = make_server("LOCAL".into(), tr_local, Some(private_key)).await?;
@@ -72,6 +74,7 @@ async fn make_server(
     private_key: Option<PrivateKey>,
 ) -> Result<Server> {
     let opts = network::ServerOpts {
+        transport: tr.clone_box(),
         id,
         transports: vec![tr],
         private_key,
@@ -82,6 +85,17 @@ async fn make_server(
     Ok(s)
 }
 
+async fn send_get_status_message(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
+    let status_msg = GetStatusMessage {};
+    let mut buf = vec![];
+    BincodeEncoder::new(&mut buf).encode(&status_msg)?;
+
+    let msg = Message::new(MessageType::GetStatus, buf);
+    tr.send_message(&to, msg.bytes()?).await?;
+
+    Ok(())
+}
+
 async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
     let priv_key = PrivateKey::generate();
     let contract = contract();
@@ -90,7 +104,7 @@ async fn send_transaction(tr: Box<dyn Transport>, to: NetAddr) -> Result<()> {
     let mut buf: Vec<u8> = Vec::new();
     tx.encode(&mut BincodeEncoder::new(&mut buf))?;
 
-    let msg = Message::new(network::MessageType::Tx, buf);
+    let msg = Message::new(MessageType::Tx, buf);
 
     tr.send_message(&to, msg.bytes()?).await?;
     Ok(())
