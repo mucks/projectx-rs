@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    core::{BincodeEncoder, Block, Blockchain, Encoder, Transaction, TxHasher},
+    core::{BincodeEncoder, Block, BlockHasher, Blockchain, Encoder, Transaction, TxHasher},
     crypto::PrivateKey,
     network::DecodedMessageData,
 };
@@ -73,7 +73,8 @@ impl Server {
         })
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<()> {
+        println!("{:?}", self.opts.transports);
         self.init_transports();
 
         if self.is_validator {
@@ -120,6 +121,7 @@ impl Server {
         }
 
         info!("Server is shutting down");
+        Ok(())
     }
 
     pub async fn validator_loop(
@@ -243,6 +245,7 @@ impl Server {
                 }
             }
         }
+        info!("Received block: {}", block.hash(Box::new(BlockHasher)));
 
         {
             self.chain.lock().await.add_block(&mut block).await?;
