@@ -26,6 +26,7 @@ impl LocalTransport {
         Self {
             addr,
             consume_channel: new_channel(1024),
+            // so we can send transport between threads and have a shared state
             peers: Arc::new(RwLock::new(HashMap::new())),
         }
     }

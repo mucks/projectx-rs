@@ -32,8 +32,16 @@ impl Validator for BlockValidator {
             // ));
         }
 
-        if b.header.height != bc.height().await + 1 {
-            return Err(anyhow!("Block {} too high!", b.hash(Box::new(BlockHasher))));
+        let bc_height = bc.height().await;
+        let block_height = b.header.height;
+
+        if block_height != bc_height + 1 {
+            return Err(anyhow!(
+                "our_height: {}, Block with height {} and hash {} too high!",
+                bc_height,
+                block_height,
+                b.hash(Box::new(BlockHasher))
+            ));
         }
 
         let header = bc.get_header(b.header.height - 1).await?;

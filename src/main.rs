@@ -13,12 +13,37 @@ mod crypto;
 mod network;
 mod types;
 
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
+    let transports = transports();
+    //bootstrap_nodes(&transports).await?;
+
+    let tr_local = transports[0].clone();
+    let tr_late = transports[1].clone();
+
+    late_server_task(transports.clone(), tr_late.clone(), tr_local.clone());
+
+    // init_remote_servers(transports_mut.clone()).await?;
+
+    let private_key = PrivateKey::generate();
+    let mut local_server =
+        make_server("LOCAL".into(), tr_local, transports, Some(private_key)).await?;
+    local_server.start().await?;
+
+    Ok(())
+}
+
 fn new_local_transport(name: &str) -> BTransport {
     Box::new(network::LocalTransport::new(name.into()))
 }
 
 fn transports() -> Vec<BTransport> {
-    vec![new_local_transport("LOCAL")]
+    vec![
+        new_local_transport("LOCAL"),
+        new_local_transport("LATE_REMOTE"),
+    ]
 }
 
 async fn late_node(
@@ -27,18 +52,8 @@ async fn late_node(
     tr_local: &mut BTransport,
 ) -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(7)).await;
-
-    println!("start of late node function");
-
-    {
-        tr_late.connect(tr_local.clone()).await?;
-        println!("Connected tr_late to tr_local");
-    }
-
-    {
-        tr_local.connect(tr_late.clone()).await?;
-        println!("Connected tr_local to tr_late");
-    }
+    tr_late.connect(tr_local.clone()).await?;
+    tr_local.connect(tr_late.clone()).await?;
 
     // lock is dropped here
 
@@ -84,34 +99,6 @@ fn send_initial_transaction() {
     //         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     //     }
     // });
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    env_logger::init();
-
-    let transports = transports();
-    //bootstrap_nodes(&transports).await?;
-    let tr_local = transports[0].clone();
-    let tr_late = new_local_transport("LATE_REMOTE");
-
-    late_server_task(transports.clone(), tr_late.clone(), tr_local.clone());
-
-    // init_remote_servers(transports_mut.clone()).await?;
-
-    let private_key = PrivateKey::generate();
-    let mut transports_clone = transports.clone();
-    transports_clone.push(tr_late.clone());
-    let mut local_server = make_server(
-        "LOCAL".into(),
-        tr_local,
-        transports_clone,
-        Some(private_key),
-    )
-    .await?;
-    local_server.start().await?;
-
-    Ok(())
 }
 
 // Connect all nodes to each other

@@ -17,7 +17,7 @@ pub struct Blockchain {
     store: Box<dyn Storage>,
     headers: RwLock<Vec<Header>>,
     validator: Option<Box<dyn Validator>>,
-    server_id: String,
+    pub server_id: String,
     // TODO: make this an interface
     contract_state: State,
 }

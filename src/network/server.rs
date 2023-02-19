@@ -141,7 +141,6 @@ impl Server {
             ticker.tick().await;
             let mut bc = bc.lock().await;
             let mut tx_pool = tx_pool.lock().await;
-            info!("Creating a new block");
             if let Err(err) = Self::create_new_block(
                 &mut bc,
                 &mut tx_pool,
@@ -233,8 +232,8 @@ impl Server {
         let our_height = self.chain.lock().await.height().await;
         if msg.current_height <= our_height {
             info!(
-                "cannot sync block_height too low our height: {}, their height: {}, addr: {}",
-                our_height, msg.current_height, from
+                "ID={} cannot sync block_height too low our height: {}, their height: {}, addr: {}",
+                self.opts.id, our_height, msg.current_height, from
             );
             return Ok(());
         }
@@ -348,7 +347,10 @@ impl Server {
         let txx = tx_pool.pending_cloned();
 
         let mut block = Block::from_prev_header(prev_header, txx)?;
-        info!("Creating new block with height {}", block.header.height);
+        info!(
+            "ID={} Creating new block with height {}",
+            bc.server_id, block.header.height
+        );
 
         block.sign(&private_key)?;
         bc.add_block(&mut block).await?;
