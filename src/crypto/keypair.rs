@@ -9,7 +9,7 @@ use sha2::Digest;
 
 use crate::types::Address;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PrivateKey {
     key: p256::SecretKey,
 }
@@ -33,7 +33,7 @@ impl PrivateKey {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct PublicKey {
     key: p256::PublicKey,
 }
@@ -59,7 +59,7 @@ impl Display for Signature {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Signature(p256::ecdsa::Signature);
 
 impl Signature {

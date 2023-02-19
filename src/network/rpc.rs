@@ -25,6 +25,7 @@ pub struct RPC {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub enum DecodedMessageData {
     Tx(Transaction),
     Block(Block),
@@ -51,11 +52,6 @@ pub fn default_rpc_decode_fn(mut rpc: RPC) -> Result<DecodedMessage> {
 
     dec.decode(&mut msg)
         .map_err(|err| anyhow!("invalid message header! error: {}", err))?;
-
-    debug!(
-        "new incoming message from {} of type : {:?}",
-        rpc.from, msg.header
-    );
 
     match msg.header {
         MessageType::Tx => {

@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use crate::core::{BincodeEncoder, Encoder, Transaction};
 
 use anyhow::Result;
 use crypto::PrivateKey;
 use log::{error, info};
 use network::{BTransport, Message, MessageType, NetAddr, Server, Transport};
-use tokio::sync::RwLock;
 
 mod core;
 mod crypto;
@@ -18,18 +15,20 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let transports = transports();
-    //bootstrap_nodes(&transports).await?;
 
     let tr_local = transports[0].clone();
     let tr_late = transports[1].clone();
 
-    late_server_task(transports.clone(), tr_late.clone(), tr_local.clone());
-
-    // init_remote_servers(transports_mut.clone()).await?;
+    late_server_task(transports.clone(), tr_local.clone(), tr_late.clone());
 
     let private_key = PrivateKey::generate();
-    let mut local_server =
-        make_server("LOCAL".into(), tr_local, transports, Some(private_key)).await?;
+    let mut local_server = make_server(
+        "LOCAL_SERVER".into(),
+        tr_local,
+        transports,
+        Some(private_key),
+    )
+    .await?;
     local_server.start().await?;
 
     Ok(())
@@ -48,17 +47,12 @@ fn transports() -> Vec<BTransport> {
 
 async fn late_node(
     transports: Vec<BTransport>,
-    tr_late: &mut BTransport,
     tr_local: &mut BTransport,
+    tr_late: &mut BTransport,
 ) -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(7)).await;
     tr_late.connect(tr_local.clone()).await?;
     tr_local.connect(tr_late.clone()).await?;
-
-    // lock is dropped here
-
-    // send_transaction(tr_local, tr_late.read().await.addr()).await?;
-    // println!("Sent Transaction from tr_local to tr_late");
 
     let mut late_server = make_server(
         "LATE_SERVER".into(),
@@ -75,8 +69,8 @@ async fn late_node(
 
 fn late_server_task(
     transports: Vec<BTransport>,
-    mut tr_late: BTransport,
     mut tr_local: BTransport,
+    mut tr_late: BTransport,
 ) {
     tokio::task::spawn(async move {
         if let Err(err) = late_node(transports, &mut tr_late, &mut tr_local).await {

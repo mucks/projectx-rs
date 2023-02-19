@@ -5,6 +5,7 @@ It is a simple in-memory transport that does not actually send messages over the
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use log::info;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -57,6 +58,11 @@ impl Transport for LocalTransport {
                 .get(to)
                 .ok_or(anyhow!("{} could not send message to {}", self.addr, to))?;
 
+        info!("Sending Message from {} to {}", self.addr, to);
+        info!("Peers: {:?}", peers);
+
+        // println!("self_addr: {}, to: {}, Peer: {:?}", self.addr, to, peer);
+
         peer.consume()
             .0
             .send(RPC {
@@ -70,7 +76,7 @@ impl Transport for LocalTransport {
 
     async fn broadcast(&self, payload: Vec<u8>) -> Result<()> {
         for peer in self.peers.read().await.iter() {
-            self.send_message(&peer.0, payload.clone()).await?;
+            self.send_message(peer.0, payload.clone()).await?;
         }
         Ok(())
     }

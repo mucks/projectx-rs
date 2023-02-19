@@ -13,7 +13,7 @@ use super::{
     hasher::Hasher,
 };
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Transaction {
     pub data: Vec<u8>,
 

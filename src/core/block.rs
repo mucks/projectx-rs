@@ -24,7 +24,7 @@ pub struct Header {
     pub height: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Block {
     pub header: Header,
     pub transactions: Vec<Transaction>,

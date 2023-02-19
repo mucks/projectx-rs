@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -62,13 +62,13 @@ impl Server {
         })
     }
 
-    pub async fn get_status_from_transports(&mut self) -> Result<()> {
-        for tr in &mut self.opts.transports {
-            let tr_addr = tr.addr();
-            if tr_addr != self.opts.transport.addr() {
-                if let Err(err) =
-                    Self::send_get_status_message(&self.opts.transport, &tr_addr).await
-                {
+    pub async fn get_status_from_transports(
+        self_tr: BTransport,
+        transports: Vec<BTransport>,
+    ) -> Result<()> {
+        for tr in transports {
+            if tr.addr() != self_tr.addr() {
+                if let Err(err) = Self::send_get_status_message(&self_tr, &tr.addr()).await {
                     error!("Send get_status_message error: {:?}", err);
                 }
             }
@@ -79,7 +79,15 @@ impl Server {
     pub async fn start(&mut self) -> Result<()> {
         // println!("{:?}", self.opts.transports);
         self.init_transports();
-        self.get_status_from_transports().await?;
+        {
+            let transports = self.opts.transports.clone();
+            let tr = self.opts.transport.clone();
+            tokio::task::spawn(async move {
+                Self::get_status_from_transports(tr, transports)
+                    .await
+                    .unwrap();
+            });
+        }
 
         if self.is_validator {
             let block_time = self.opts.block_time.unwrap();
@@ -102,9 +110,14 @@ impl Server {
                     match rpc_decode_fn(rpc) {
                         Ok(msg) => {
                             debug!(
-                                "ID={} RPC Message incoming from: {} ",
-                                &self.opts.id, msg.from
+                                "ID={} RPC Message incoming from: {}, data: {:?}",
+                                &self.opts.id, msg.from, msg.data
                             );
+                            if self.opts.transport.addr() == msg.from {
+                                warn!("ID={} Message from self, ignoring", &self.opts.id);
+                                continue;
+                            }
+
                             if let Err(err) = self.process_message(msg).await {
                                 if err.to_string() != "block already known" {
                                     error!("ID={} error processing message: {}", self.opts.id, err);
@@ -230,13 +243,23 @@ impl Server {
         msg: StatusMessage,
     ) -> Result<()> {
         let our_height = self.chain.lock().await.height().await;
+        info!(
+            "ID={}, height: {}, received status message from: {}, height: {}",
+            self.opts.id, our_height, from, msg.current_height
+        );
+
         if msg.current_height <= our_height {
-            info!(
+            warn!(
                 "ID={} cannot sync block_height too low our height: {}, their height: {}, addr: {}",
                 self.opts.id, our_height, msg.current_height, from
             );
             return Ok(());
         }
+        info!(
+            "ID={} syncing block_height our height: {}, their height: {}, addr: {}",
+            self.opts.id, our_height, msg.current_height, from
+        );
+
         // In this case we are behind and need to sync
         let get_blocks_msg = GetBlocksMessage {
             from: our_height + 1,
@@ -247,11 +270,22 @@ impl Server {
         BincodeEncoder::new(&mut buf).encode(&get_blocks_msg)?;
 
         let msg = Message::new(MessageType::GetBlocks, buf);
-        self.opts.transport.send_message(from, msg.bytes()?).await
+
+        let tr = self.opts.transport.clone();
+        let to = from.to_owned();
+
+        tokio::task::spawn(async move {
+            tr.send_message(&to, msg.bytes().unwrap()).await.unwrap();
+        });
+
+        Ok(())
     }
 
     pub async fn process_get_status_message(&mut self, from: &NetAddr) -> Result<()> {
-        info!("Received get_status_message from {}", from);
+        info!(
+            "ID={}, Received get_status_message from {}",
+            self.opts.id, from
+        );
         let height = self.chain.lock().await.height().await;
 
         //TODO: get version from somewhere
@@ -261,7 +295,14 @@ impl Server {
         BincodeEncoder::new(&mut buf).encode(&status_msg)?;
 
         let msg = Message::new(MessageType::Status, buf);
-        self.opts.transport.send_message(from, msg.bytes()?).await?;
+        info!("ID={}, sending status message to {}", self.opts.id, from);
+
+        let tr = self.opts.transport.clone();
+        let to = from.to_owned();
+
+        tokio::task::spawn(async move {
+            tr.send_message(&to, msg.bytes().unwrap()).await.unwrap();
+        });
 
         Ok(())
     }
@@ -370,6 +411,10 @@ impl Server {
 
     fn init_transports(&self) {
         for tr in self.opts.transports.clone().into_iter() {
+            if tr.addr() == self.opts.transport.addr() {
+                continue;
+            }
+
             let rpc_channel = self.rpc_channel.clone();
             tokio::task::spawn(async move {
                 loop {
