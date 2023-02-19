@@ -27,7 +27,7 @@ pub type BTransport = Box<dyn Transport>;
 pub trait Transport: TransportClone + Send + Sync + Debug {
     fn consume(&self) -> Channel<RPC>;
     async fn recv(&self) -> Option<RPC>;
-    async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()>;
+    async fn connect(&self, tr: Box<dyn Transport>) -> Result<()>;
     async fn send_message(&self, to: &NetAddr, payload: Vec<u8>) -> Result<()>;
     async fn broadcast(&self, payload: Vec<u8>) -> Result<()>;
     async fn peers(&self) -> HashMap<NetAddr, Box<dyn Transport>>;

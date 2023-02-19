@@ -47,8 +47,8 @@ fn transports() -> Vec<BTransport> {
 
 async fn late_node(
     transports: Vec<BTransport>,
-    tr_local: &mut BTransport,
-    tr_late: &mut BTransport,
+    tr_local: BTransport,
+    tr_late: BTransport,
 ) -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(7)).await;
     tr_late.connect(tr_local.clone()).await?;
@@ -67,13 +67,9 @@ async fn late_node(
     Ok(())
 }
 
-fn late_server_task(
-    transports: Vec<BTransport>,
-    mut tr_local: BTransport,
-    mut tr_late: BTransport,
-) {
+fn late_server_task(transports: Vec<BTransport>, tr_local: BTransport, tr_late: BTransport) {
     tokio::task::spawn(async move {
-        if let Err(err) = late_node(transports, &mut tr_late, &mut tr_local).await {
+        if let Err(err) = late_node(transports, tr_late, tr_local).await {
             error!("{}", err)
         }
     });

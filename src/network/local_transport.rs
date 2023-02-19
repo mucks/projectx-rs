@@ -43,7 +43,7 @@ impl Transport for LocalTransport {
         self.consume_channel.1.lock().await.recv().await
     }
 
-    async fn connect(&mut self, tr: Box<dyn Transport>) -> Result<()> {
+    async fn connect(&self, tr: Box<dyn Transport>) -> Result<()> {
         self.peers.write().await.insert(tr.addr(), tr);
         Ok(())
     }
@@ -57,9 +57,6 @@ impl Transport for LocalTransport {
             peers
                 .get(to)
                 .ok_or(anyhow!("{} could not send message to {}", self.addr, to))?;
-
-        info!("Sending Message from {} to {}", self.addr, to);
-        info!("Peers: {:?}", peers);
 
         // println!("self_addr: {}, to: {}, Peer: {:?}", self.addr, to, peer);
 
